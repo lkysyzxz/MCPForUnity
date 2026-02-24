@@ -287,9 +287,14 @@ namespace ModelContextProtocol.Editor
 
         private void OnDestroy()
         {
-            if (_isRunning)
+            if (_isRunning && _serverComponent != null)
             {
-                StopServer();
+                try
+                {
+                    _serverComponent.StopServerAsync().Wait(1000);
+                }
+                catch { }
+                CleanupServer();
             }
         }
     }
