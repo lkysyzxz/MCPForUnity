@@ -1,0 +1,789 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using ModelContextProtocol.Protocol;
+using Newtonsoft.Json.Linq;
+
+namespace ModelContextProtocol.Server
+{
+    public class McpServer : IAsyncDisposable
+    {
+        private readonly McpServerOptions _options;
+        private readonly HttpListenerServerTransport _transport;
+        private readonly McpSessionHandler _sessionHandler;
+        private readonly RequestHandlers _requestHandlers = new RequestHandlers();
+        private readonly NotificationHandlers _notificationHandlers = new NotificationHandlers();
+        private readonly ILogger _logger;
+
+        private readonly McpServerPrimitiveCollection<Tool> _tools = new McpServerPrimitiveCollection<Tool>();
+        private readonly McpServerPrimitiveCollection<Prompt> _prompts = new McpServerPrimitiveCollection<Prompt>();
+        private readonly McpServerPrimitiveCollection<Resource> _resources = new McpServerPrimitiveCollection<Resource>();
+        private readonly Dictionary<string, Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>>> _toolHandlers = new Dictionary<string, Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>>>();
+        private readonly Dictionary<string, Func<GetPromptRequestParams, CancellationToken, Task<GetPromptResult>>> _promptHandlers = new Dictionary<string, Func<GetPromptRequestParams, CancellationToken, Task<GetPromptResult>>>();
+        private readonly Dictionary<string, Func<ReadResourceRequestParams, CancellationToken, Task<ReadResourceResult>>> _resourceHandlers = new Dictionary<string, Func<ReadResourceRequestParams, CancellationToken, Task<ReadResourceResult>>>();
+
+        private readonly IMcpTaskStore _taskStore;
+        private Task _runTask;
+
+        public McpServerPrimitiveCollection<Tool> Tools => _tools;
+        public McpServerPrimitiveCollection<Prompt> Prompts => _prompts;
+        public McpServerPrimitiveCollection<Resource> Resources => _resources;
+        public IMcpTaskStore TaskStore => _taskStore;
+
+        public McpServer(McpServerOptions options = null, ILogger logger = null, IMcpTaskStore taskStore = null)
+        {
+            _options = options ?? new McpServerOptions();
+            _logger = logger ?? new UnityLoggerImpl();
+            _taskStore = taskStore ?? new InMemoryMcpTaskStore();
+
+            InitializeCapabilities();
+            SetupHandlers();
+
+            _transport = new HttpListenerServerTransport(_options.Port, _options.Path, _logger);
+            _sessionHandler = new McpSessionHandler(_transport, _options, _requestHandlers, _notificationHandlers, _logger);
+        }
+
+        private void InitializeCapabilities()
+        {
+            if (_options.Capabilities == null)
+            {
+                _options.Capabilities = new ServerCapabilities();
+            }
+
+            _options.Capabilities.Tools = new ToolsCapability { ListChanged = true };
+            _options.Capabilities.Prompts = new PromptsCapability { ListChanged = true };
+            _options.Capabilities.Resources = new ResourcesCapability { Subscribe = true, ListChanged = true };
+            _options.Capabilities.Tasks = new McpTasksCapability { Supported = true, Storage = "memory" };
+        }
+
+        private void SetupHandlers()
+        {
+            _requestHandlers.Set<ListToolsRequestParams, ListToolsResult>(RequestMethods.ToolsList, HandleToolsListAsync);
+            _requestHandlers.Set<CallToolRequestParams, CallToolResult>(RequestMethods.ToolsCall, HandleToolsCallAsync);
+            _requestHandlers.Set<ListPromptsRequestParams, ListPromptsResult>(RequestMethods.PromptsList, HandlePromptsListAsync);
+            _requestHandlers.Set<GetPromptRequestParams, GetPromptResult>(RequestMethods.PromptsGet, HandlePromptsGetAsync);
+            _requestHandlers.Set<ListResourcesRequestParams, ListResourcesResult>(RequestMethods.ResourcesList, HandleResourcesListAsync);
+            _requestHandlers.Set<ReadResourceRequestParams, ReadResourceResult>(RequestMethods.ResourcesRead, HandleResourcesReadAsync);
+            _requestHandlers.Set<GetTaskRequestParams, GetTaskResult>(RequestMethods.TasksGet, HandleTaskGetAsync);
+            _requestHandlers.Set<ListTasksRequestParams, ListTasksResult>(RequestMethods.TasksList, HandleTaskListAsync);
+            _requestHandlers.Set<CancelMcpTaskRequestParams, CancelMcpTaskResult>(RequestMethods.TasksCancel, HandleTaskCancelAsync);
+        }
+
+        public void AddTool(Tool tool, Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>> handler)
+        {
+            Throw.IfNull(tool);
+            Throw.IfNullOrWhiteSpace(tool.Name);
+
+            _tools.Add(tool);
+            _toolHandlers[tool.Name] = handler;
+            _logger.Log(LogLevel.Debug, $"Tool registered: {tool.Name}");
+        }
+
+        public void AddTool(string name, string description, Func<JObject, CancellationToken, Task<CallToolResult>> handler, JObject inputSchema = null)
+        {
+            var tool = new Tool
+            {
+                Name = name,
+                Description = description,
+                InputSchema = inputSchema ?? JObject.Parse("{\"type\":\"object\"}")
+            };
+
+            AddTool(tool, async (requestParams, ct) =>
+            {
+                return await handler(requestParams.Arguments, ct);
+            });
+        }
+
+        public void AddPrompt(Prompt prompt, Func<GetPromptRequestParams, CancellationToken, Task<GetPromptResult>> handler)
+        {
+            Throw.IfNull(prompt);
+            Throw.IfNullOrWhiteSpace(prompt.Name);
+
+            _prompts.Add(prompt);
+            _promptHandlers[prompt.Name] = handler;
+            _logger.Log(LogLevel.Debug, $"Prompt registered: {prompt.Name}");
+        }
+
+        public void AddResource(Resource resource, Func<ReadResourceRequestParams, CancellationToken, Task<ReadResourceResult>> handler)
+        {
+            Throw.IfNull(resource);
+            Throw.IfNullOrWhiteSpace(resource.Uri);
+
+            _resources.Add(resource);
+            _resourceHandlers[resource.Uri] = handler;
+            _logger.Log(LogLevel.Debug, $"Resource registered: {resource.Uri}");
+        }
+
+        private Task<ListToolsResult> HandleToolsListAsync(ListToolsRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            var result = new ListToolsResult
+            {
+                Tools = new List<Tool>(_tools)
+            };
+            return Task.FromResult(result);
+        }
+
+        private async Task<CallToolResult> HandleToolsCallAsync(CallToolRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            if (requestParams == null || string.IsNullOrEmpty(requestParams.Name))
+            {
+                return new CallToolResult
+                {
+                    IsError = true,
+                    Content = new List<ContentBlock>
+                    {
+                        new TextContentBlock { Text = "Tool name is required" }
+                    }
+                };
+            }
+
+            if (!_toolHandlers.TryGetValue(requestParams.Name, out var handler))
+            {
+                return new CallToolResult
+                {
+                    IsError = true,
+                    Content = new List<ContentBlock>
+                    {
+                        new TextContentBlock { Text = $"Tool not found: {requestParams.Name}" }
+                    }
+                };
+            }
+
+            try
+            {
+                return await handler(requestParams, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.Log(LogLevel.Error, $"Tool execution error: {ex.Message}", ex);
+                return new CallToolResult
+                {
+                    IsError = true,
+                    Content = new List<ContentBlock>
+                    {
+                        new TextContentBlock { Text = $"Error: {ex.Message}" }
+                    }
+                };
+            }
+        }
+
+        private Task<ListPromptsResult> HandlePromptsListAsync(ListPromptsRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            var result = new ListPromptsResult
+            {
+                Prompts = new List<Prompt>(_prompts)
+            };
+            return Task.FromResult(result);
+        }
+
+        private async Task<GetPromptResult> HandlePromptsGetAsync(GetPromptRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            if (requestParams == null || string.IsNullOrEmpty(requestParams.Name))
+            {
+                return new GetPromptResult
+                {
+                    Messages = new List<PromptMessage>
+                    {
+                        new PromptMessage
+                        {
+                            Role = Role.Assistant,
+                            Content = new TextContentBlock { Text = "Prompt name is required" }
+                        }
+                    }
+                };
+            }
+
+            if (!_promptHandlers.TryGetValue(requestParams.Name, out var handler))
+            {
+                return new GetPromptResult
+                {
+                    Messages = new List<PromptMessage>
+                    {
+                        new PromptMessage
+                        {
+                            Role = Role.Assistant,
+                            Content = new TextContentBlock { Text = $"Prompt not found: {requestParams.Name}" }
+                        }
+                    }
+                };
+            }
+
+            return await handler(requestParams, cancellationToken);
+        }
+
+        private Task<ListResourcesResult> HandleResourcesListAsync(ListResourcesRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            var result = new ListResourcesResult
+            {
+                Resources = new List<Resource>(_resources)
+            };
+            return Task.FromResult(result);
+        }
+
+        private async Task<ReadResourceResult> HandleResourcesReadAsync(ReadResourceRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            if (requestParams == null || string.IsNullOrEmpty(requestParams.Uri))
+            {
+                return new ReadResourceResult
+                {
+                    Contents = new List<ResourceContents>
+                    {
+                        new TextResourceContents { Text = "Resource URI is required" }
+                    }
+                };
+            }
+
+            if (!_resourceHandlers.TryGetValue(requestParams.Uri, out var handler))
+            {
+                return new ReadResourceResult
+                {
+                    Contents = new List<ResourceContents>
+                    {
+                        new TextResourceContents { Text = $"Resource not found: {requestParams.Uri}" }
+                    }
+                };
+            }
+
+            return await handler(requestParams, cancellationToken);
+        }
+
+        private async Task<GetTaskResult> HandleTaskGetAsync(GetTaskRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            if (requestParams == null || string.IsNullOrEmpty(requestParams.TaskId))
+            {
+                throw new McpException(McpErrorCode.InvalidParams, "Task ID is required");
+            }
+
+            var task = await _taskStore.GetTaskAsync(requestParams.TaskId, cancellationToken);
+            if (task == null)
+            {
+                throw new McpException(McpErrorCode.InvalidParams, $"Task not found: {requestParams.TaskId}");
+            }
+
+            return new GetTaskResult { Task = task };
+        }
+
+        private async Task<ListTasksResult> HandleTaskListAsync(ListTasksRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            McpTaskStatus? status = null;
+            if (!string.IsNullOrEmpty(requestParams?.Status))
+            {
+                Enum.TryParse(requestParams.Status, true, out McpTaskStatus parsedStatus);
+                status = parsedStatus;
+            }
+
+            var tasks = await _taskStore.ListTasksAsync(status, cancellationToken);
+            return new ListTasksResult { Tasks = tasks };
+        }
+
+        private async Task<CancelMcpTaskResult> HandleTaskCancelAsync(CancelMcpTaskRequestParams requestParams, CancellationToken cancellationToken)
+        {
+            if (requestParams == null || string.IsNullOrEmpty(requestParams.TaskId))
+            {
+                throw new McpException(McpErrorCode.InvalidParams, "Task ID is required");
+            }
+
+            await _taskStore.CancelTaskAsync(requestParams.TaskId, requestParams.Reason, cancellationToken);
+            return new CancelMcpTaskResult();
+        }
+
+        public async Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            await _transport.StartAsync(cancellationToken);
+            _runTask = _sessionHandler.ProcessMessagesAsync(cancellationToken);
+            _logger.Log(LogLevel.Information, $"MCP Server started on port {_options.Port}");
+        }
+
+        public void RegisterToolsFromClass<T>()
+        {
+            RegisterToolsFromClass(typeof(T));
+        }
+
+        public void RegisterToolsFromClass(Type type)
+        {
+            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance);
+
+            foreach (var method in methods)
+            {
+                var attr = method.GetCustomAttribute<McpServerToolAttribute>();
+                if (attr != null)
+                {
+                    RegisterToolFromMethod(method, attr, type);
+                }
+            }
+        }
+
+        private void RegisterToolFromMethod(MethodInfo method, McpServerToolAttribute attr, Type declaringType)
+        {
+            string name = !string.IsNullOrEmpty(attr.Name) ? attr.Name : method.Name;
+            string description = attr.Description ?? "";
+
+            var tool = new Tool
+            {
+                Name = name,
+                Description = description,
+                InputSchema = attr.InputSchema ?? GenerateInputSchema(method)
+            };
+
+            bool isStatic = method.IsStatic;
+            object instance = null;
+
+            if (!isStatic)
+            {
+                instance = Activator.CreateInstance(declaringType);
+            }
+
+            Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>> handler = async (requestParams, ct) =>
+            {
+                try
+                {
+                    var parameters = method.GetParameters();
+                    object[] args = new object[parameters.Length];
+
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        var param = parameters[i];
+                        if (param.ParameterType == typeof(CancellationToken))
+                        {
+                            args[i] = ct;
+                        }
+                        else if (param.ParameterType == typeof(CallToolRequestParams))
+                        {
+                            args[i] = requestParams;
+                        }
+                        else if (param.ParameterType == typeof(JObject))
+                        {
+                            args[i] = requestParams.Arguments;
+                        }
+                        else if (IsVectorType(param.ParameterType))
+                        {
+                            args[i] = ParseVectorArgument(requestParams.Arguments, param);
+                        }
+                        else if (requestParams.Arguments != null && requestParams.Arguments.TryGetValue(param.Name, out var token))
+                        {
+                            args[i] = token.ToObject(param.ParameterType);
+                        }
+                        else if (param.HasDefaultValue)
+                        {
+                            args[i] = param.DefaultValue;
+                        }
+                        else
+                        {
+                            args[i] = param.ParameterType.IsValueType ? Activator.CreateInstance(param.ParameterType) : null;
+                        }
+                    }
+
+                    object result = method.Invoke(isStatic ? null : instance, args);
+
+                    if (result is Task<CallToolResult> taskResult)
+                    {
+                        return await taskResult;
+                    }
+                    else if (result is Task<string> taskString)
+                    {
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = await taskString }
+                            }
+                        };
+                    }
+                    else if (result is Task task)
+                    {
+                        await task;
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = "OK" }
+                            }
+                        };
+                    }
+                    else if (result is CallToolResult directResult)
+                    {
+                        return directResult;
+                    }
+                    else if (result is string text)
+                    {
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = text }
+                            }
+                        };
+                    }
+                    else
+                    {
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = result?.ToString() ?? "null" }
+                            }
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return new CallToolResult
+                    {
+                        IsError = true,
+                        Content = new List<ContentBlock>
+                        {
+                            new TextContentBlock { Text = $"Error: {ex.InnerException?.Message ?? ex.Message}" }
+                        }
+                    };
+                }
+            };
+
+            AddTool(tool, handler);
+        }
+
+        private JObject GenerateInputSchema(MethodInfo method)
+        {
+            var parameters = method.GetParameters();
+            if (parameters.Length == 0)
+            {
+                return JObject.Parse("{\"type\":\"object\"}");
+            }
+
+            var schema = new JObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JObject(),
+                ["required"] = new JArray()
+            };
+
+            var properties = (JObject)schema["properties"];
+            var required = (JArray)schema["required"];
+
+            foreach (var param in parameters)
+            {
+                if (param.ParameterType == typeof(CancellationToken) || 
+                    param.ParameterType == typeof(CallToolRequestParams) ||
+                    param.ParameterType == typeof(JObject))
+                {
+                    continue;
+                }
+
+                var argAttr = param.GetCustomAttribute<McpArgumentAttribute>();
+                string paramName = argAttr?.Name ?? param.Name;
+                string paramDesc = argAttr?.Description ?? "";
+                bool isRequired = argAttr?.Required ?? !param.HasDefaultValue;
+
+                // 处理 Unity 向量类型 - 展开为多个参数
+                if (IsVectorType(param.ParameterType))
+                {
+                    AddVectorProperties(properties, required, paramName, paramDesc, param.ParameterType, isRequired, param);
+                    continue;
+                }
+
+                var propSchema = GeneratePropertySchema(param.ParameterType);
+
+                if (!string.IsNullOrEmpty(paramDesc))
+                {
+                    propSchema["description"] = paramDesc;
+                }
+
+                if (param.HasDefaultValue && param.DefaultValue != null)
+                {
+                    var defaultValue = param.DefaultValue;
+                    if (param.ParameterType.IsEnum && defaultValue is Enum enumValue)
+                    {
+                        propSchema["default"] = enumValue.ToString();
+                    }
+                    else
+                    {
+                        propSchema["default"] = JToken.FromObject(defaultValue);
+                    }
+                }
+
+                properties[paramName] = propSchema;
+
+                if (isRequired)
+                {
+                    required.Add(paramName);
+                }
+            }
+
+            if (required.Count == 0)
+            {
+                schema.Remove("required");
+            }
+
+            return schema;
+        }
+
+        private bool IsVectorType(Type type)
+        {
+            return type == typeof(UnityEngine.Vector2) ||
+                   type == typeof(UnityEngine.Vector3) ||
+                   type == typeof(UnityEngine.Quaternion);
+        }
+
+        private void AddVectorProperties(JObject properties, JArray required, string paramName, string paramDesc, Type type, bool isRequired, ParameterInfo param)
+        {
+            string[] axes;
+            if (type == typeof(UnityEngine.Vector2))
+            {
+                axes = new[] { "x", "y" };
+            }
+            else if (type == typeof(UnityEngine.Vector3))
+            {
+                axes = new[] { "x", "y", "z" };
+            }
+            else // Quaternion
+            {
+                axes = new[] { "x", "y", "z", "w" };
+            }
+
+            // 尝试从默认值获取各分量
+            float[] defaultValues = null;
+            if (param.HasDefaultValue && param.DefaultValue != null && param.DefaultValue != DBNull.Value)
+            {
+                defaultValues = ExtractVectorDefaults(param.DefaultValue, type);
+            }
+
+            for (int i = 0; i < axes.Length; i++)
+            {
+                string axis = axes[i];
+                string propName = $"{paramName}_{axis}";
+                string axisUpper = axis.ToUpper();
+
+                var propSchema = new JObject
+                {
+                    ["type"] = "number",
+                    ["description"] = string.IsNullOrEmpty(paramDesc) 
+                        ? $"{paramName} ({axisUpper})" 
+                        : $"{paramDesc} ({axisUpper})"
+                };
+
+                if (defaultValues != null && i < defaultValues.Length)
+                {
+                    propSchema["default"] = defaultValues[i];
+                }
+
+                properties[propName] = propSchema;
+
+                if (isRequired)
+                {
+                    required.Add(propName);
+                }
+            }
+        }
+
+        private float[] ExtractVectorDefaults(object defaultValue, Type type)
+        {
+            try
+            {
+                if (type == typeof(UnityEngine.Vector2) && defaultValue is UnityEngine.Vector2 v2)
+                {
+                    return new[] { v2.x, v2.y };
+                }
+                if (type == typeof(UnityEngine.Vector3) && defaultValue is UnityEngine.Vector3 v3)
+                {
+                    return new[] { v3.x, v3.y, v3.z };
+                }
+                if (type == typeof(UnityEngine.Quaternion) && defaultValue is UnityEngine.Quaternion q)
+                {
+                    return new[] { q.x, q.y, q.z, q.w };
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private object ParseVectorArgument(JObject args, ParameterInfo param)
+        {
+            string paramName = param.Name;
+            Type type = param.ParameterType;
+            
+            // 获取默认值作为备用
+            float[] defaults = null;
+            if (param.HasDefaultValue && param.DefaultValue != null && param.DefaultValue != DBNull.Value)
+            {
+                defaults = ExtractVectorDefaults(param.DefaultValue, type);
+            }
+
+            if (type == typeof(UnityEngine.Vector2))
+            {
+                float x = GetVectorComponent(args, paramName, "x", defaults, 0);
+                float y = GetVectorComponent(args, paramName, "y", defaults, 1);
+                return new UnityEngine.Vector2(x, y);
+            }
+            
+            if (type == typeof(UnityEngine.Vector3))
+            {
+                float x = GetVectorComponent(args, paramName, "x", defaults, 0);
+                float y = GetVectorComponent(args, paramName, "y", defaults, 1);
+                float z = GetVectorComponent(args, paramName, "z", defaults, 2);
+                return new UnityEngine.Vector3(x, y, z);
+            }
+            
+            if (type == typeof(UnityEngine.Quaternion))
+            {
+                float x = GetVectorComponent(args, paramName, "x", defaults, 0);
+                float y = GetVectorComponent(args, paramName, "y", defaults, 1);
+                float z = GetVectorComponent(args, paramName, "z", defaults, 2);
+                float w = GetVectorComponent(args, paramName, "w", defaults, 3);
+                return new UnityEngine.Quaternion(x, y, z, w);
+            }
+
+            return null;
+        }
+
+        private float GetVectorComponent(JObject args, string paramName, string component, float[] defaults, int defaultIndex)
+        {
+            string key = $"{paramName}_{component}";
+            
+            if (args != null && args.TryGetValue(key, out var token))
+            {
+                return token.Value<float>();
+            }
+            
+            if (defaults != null && defaultIndex < defaults.Length)
+            {
+                return defaults[defaultIndex];
+            }
+            
+            // 对于 Quaternion，w 默认为 1，其他为 0
+            if (component == "w")
+            {
+                return 1f;
+            }
+            
+            return 0f;
+        }
+
+        private JObject GeneratePropertySchema(Type type)
+        {
+            var schema = new JObject();
+
+            // 处理枚举类型
+            if (type.IsEnum)
+            {
+                schema["type"] = "string";
+                var enumValues = new JArray();
+                foreach (var value in System.Enum.GetValues(type))
+                {
+                    enumValues.Add(value.ToString());
+                }
+                schema["enum"] = enumValues;
+                return schema;
+            }
+
+            // 处理可空类型
+            var underlyingType = Nullable.GetUnderlyingType(type);
+            if (underlyingType != null)
+            {
+                // 可空枚举
+                if (underlyingType.IsEnum)
+                {
+                    schema["type"] = "string";
+                    var enumValues = new JArray();
+                    foreach (var value in System.Enum.GetValues(underlyingType))
+                    {
+                        enumValues.Add(value.ToString());
+                    }
+                    schema["enum"] = enumValues;
+                    return schema;
+                }
+
+                // 其他可空类型 - 递归处理基础类型
+                return GeneratePropertySchema(underlyingType);
+            }
+
+            // 处理数组类型
+            if (type.IsArray)
+            {
+                schema["type"] = "array";
+                Type elementType = type.GetElementType();
+                schema["items"] = GeneratePropertySchema(elementType);
+                return schema;
+            }
+
+            // 处理泛型集合
+            if (type.IsGenericType)
+            {
+                var genericDef = type.GetGenericTypeDefinition();
+                
+                if (genericDef == typeof(List<>) || 
+                    genericDef == typeof(IList<>) ||
+                    genericDef == typeof(IEnumerable<>) ||
+                    genericDef == typeof(ICollection<>) ||
+                    genericDef == typeof(HashSet<>) ||
+                    genericDef == typeof(IReadOnlyList<>) ||
+                    genericDef == typeof(IReadOnlyCollection<>))
+                {
+                    schema["type"] = "array";
+                    Type elementType = type.GetGenericArguments()[0];
+                    schema["items"] = GeneratePropertySchema(elementType);
+                    return schema;
+                }
+            }
+
+            // 基本类型
+            if (type == typeof(string))
+            {
+                schema["type"] = "string";
+            }
+            else if (type == typeof(int) || type == typeof(long) || type == typeof(short) || type == typeof(byte) || 
+                     type == typeof(uint) || type == typeof(ulong) || type == typeof(ushort) || type == typeof(sbyte))
+            {
+                schema["type"] = "integer";
+            }
+            else if (type == typeof(float) || type == typeof(double) || type == typeof(decimal))
+            {
+                schema["type"] = "number";
+            }
+            else if (type == typeof(bool))
+            {
+                schema["type"] = "boolean";
+            }
+            else if (type == typeof(DateTime))
+            {
+                schema["type"] = "string";
+                schema["format"] = "date-time";
+            }
+            else if (type == typeof(Guid))
+            {
+                schema["type"] = "string";
+                schema["format"] = "uuid";
+            }
+            else if (type == typeof(byte[]))
+            {
+                schema["type"] = "string";
+                schema["format"] = "byte";
+            }
+            else
+            {
+                schema["type"] = "string";
+            }
+
+            return schema;
+        }
+
+        public async Task SendNotificationAsync(string method, object parameters = null, CancellationToken cancellationToken = default)
+        {
+            var notification = new JsonRpcNotification
+            {
+                Method = method,
+                Params = parameters != null ? JToken.FromObject(parameters) : null
+            };
+
+            await _sessionHandler.SendNotificationAsync(notification, cancellationToken);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await _sessionHandler.DisposeAsync();
+            await _transport.DisposeAsync();
+            _logger.Log(LogLevel.Information, "MCP Server disposed");
+        }
+    }
+}
