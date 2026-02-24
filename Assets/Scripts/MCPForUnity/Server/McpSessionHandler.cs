@@ -13,6 +13,11 @@ namespace ModelContextProtocol.Server
 {
     internal class McpSessionHandler : IAsyncDisposable
     {
+        private static readonly JsonSerializerSettings CachedJsonSettings = new JsonSerializerSettings
+        {
+            Converters = new List<JsonConverter> { new RequestIdConverter() }
+        };
+
         public const string LatestProtocolVersion = "2025-11-25";
         public static readonly string[] SupportedProtocolVersions = new[]
         {
@@ -224,11 +229,7 @@ namespace ModelContextProtocol.Server
 
         private async Task<JsonRpcMessage> HandleInitializeAsync(JsonRpcRequest request, CancellationToken cancellationToken)
         {
-            var settings = new JsonSerializerSettings
-            {
-                Converters = new List<JsonConverter> { new RequestIdConverter() }
-            };
-            var serializer = JsonSerializer.Create(settings);
+            var serializer = JsonSerializer.Create(CachedJsonSettings);
             var @params = request.Params?.ToObject<InitializeRequestParams>(serializer);
 
             if (@params != null)

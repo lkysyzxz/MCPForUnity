@@ -13,6 +13,12 @@ namespace ModelContextProtocol.Protocol
 {
     public class HttpListenerServerTransport : ITransport
     {
+        private static readonly JsonSerializerSettings CachedJsonSettings = new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore,
+            Converters = new List<JsonConverter> { new RequestIdConverter() }
+        };
+
         private readonly HttpListener _listener;
         private readonly int _port;
         private readonly string _path;
@@ -246,15 +252,7 @@ namespace ModelContextProtocol.Protocol
         {
             var messages = new List<JsonRpcMessage>();
             var token = JToken.Parse(body);
-
-            var settings = new JsonSerializerSettings
-            {
-                Converters = new List<JsonConverter>
-                {
-                    new RequestIdConverter()
-                }
-            };
-            var serializer = JsonSerializer.Create(settings);
+            var serializer = JsonSerializer.Create(CachedJsonSettings);
 
             if (token is JArray array)
             {
@@ -284,10 +282,7 @@ namespace ModelContextProtocol.Protocol
             return new JObject
             {
                 ["jsonrpc"] = "2.0",
-                ["id"] = JToken.FromObject(id, JsonSerializer.Create(new JsonSerializerSettings
-                {
-                    Converters = { new RequestIdConverter() }
-                })),
+                ["id"] = JToken.FromObject(id, JsonSerializer.Create(CachedJsonSettings)),
                 ["result"] = new JObject { ["status"] = "accepted" }
             };
         }
@@ -299,16 +294,7 @@ namespace ModelContextProtocol.Protocol
                 throw new InvalidOperationException("Transport is not connected");
             }
 
-            var settings = new JsonSerializerSettings
-            {
-                NullValueHandling = NullValueHandling.Ignore,
-                Converters = new List<JsonConverter>
-                {
-                    new RequestIdConverter()
-                }
-            };
-
-            string json = JsonConvert.SerializeObject(message, settings);
+            string json = JsonConvert.SerializeObject(message, CachedJsonSettings);
             _logger.Log(LogLevel.Debug, $"Sending message: {json}");
 
             foreach (var session in _sseSessions.Values)

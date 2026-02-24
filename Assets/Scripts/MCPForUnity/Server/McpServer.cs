@@ -27,6 +27,12 @@ namespace ModelContextProtocol.Server
         private readonly IMcpTaskStore _taskStore;
         private Task _runTask;
 
+        // 缓存的响应对象
+        private ListToolsResult _cachedToolsList;
+        private ListPromptsResult _cachedPromptsList;
+        private ListResourcesResult _cachedResourcesList;
+        private readonly object _cacheLock = new object();
+
         public McpServerPrimitiveCollection<Tool> Tools => _tools;
         public McpServerPrimitiveCollection<Prompt> Prompts => _prompts;
         public McpServerPrimitiveCollection<Resource> Resources => _resources;
@@ -71,6 +77,16 @@ namespace ModelContextProtocol.Server
             _requestHandlers.Set<CancelMcpTaskRequestParams, CancelMcpTaskResult>(RequestMethods.TasksCancel, HandleTaskCancelAsync);
         }
 
+        private void InvalidateListCaches()
+        {
+            lock (_cacheLock)
+            {
+                _cachedToolsList = null;
+                _cachedPromptsList = null;
+                _cachedResourcesList = null;
+            }
+        }
+
         public void AddTool(Tool tool, Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>> handler)
         {
             Throw.IfNull(tool);
@@ -79,6 +95,7 @@ namespace ModelContextProtocol.Server
             _tools.Add(tool);
             _toolHandlers[tool.Name] = handler;
             _logger.Log(LogLevel.Debug, $"Tool registered: {tool.Name}");
+            InvalidateListCaches();
         }
 
         public void AddTool(string name, string description, Func<JObject, CancellationToken, Task<CallToolResult>> handler, JObject inputSchema = null)
@@ -104,6 +121,7 @@ namespace ModelContextProtocol.Server
             _prompts.Add(prompt);
             _promptHandlers[prompt.Name] = handler;
             _logger.Log(LogLevel.Debug, $"Prompt registered: {prompt.Name}");
+            InvalidateListCaches();
         }
 
         public void AddResource(Resource resource, Func<ReadResourceRequestParams, CancellationToken, Task<ReadResourceResult>> handler)
@@ -114,15 +132,25 @@ namespace ModelContextProtocol.Server
             _resources.Add(resource);
             _resourceHandlers[resource.Uri] = handler;
             _logger.Log(LogLevel.Debug, $"Resource registered: {resource.Uri}");
+            InvalidateListCaches();
         }
 
         private Task<ListToolsResult> HandleToolsListAsync(ListToolsRequestParams requestParams, CancellationToken cancellationToken)
         {
-            var result = new ListToolsResult
+            if (_cachedToolsList == null)
             {
-                Tools = new List<Tool>(_tools)
-            };
-            return Task.FromResult(result);
+                lock (_cacheLock)
+                {
+                    if (_cachedToolsList == null)
+                    {
+                        _cachedToolsList = new ListToolsResult
+                        {
+                            Tools = new List<Tool>(_tools)
+                        };
+                    }
+                }
+            }
+            return Task.FromResult(_cachedToolsList);
         }
 
         private async Task<CallToolResult> HandleToolsCallAsync(CallToolRequestParams requestParams, CancellationToken cancellationToken)
@@ -171,11 +199,20 @@ namespace ModelContextProtocol.Server
 
         private Task<ListPromptsResult> HandlePromptsListAsync(ListPromptsRequestParams requestParams, CancellationToken cancellationToken)
         {
-            var result = new ListPromptsResult
+            if (_cachedPromptsList == null)
             {
-                Prompts = new List<Prompt>(_prompts)
-            };
-            return Task.FromResult(result);
+                lock (_cacheLock)
+                {
+                    if (_cachedPromptsList == null)
+                    {
+                        _cachedPromptsList = new ListPromptsResult
+                        {
+                            Prompts = new List<Prompt>(_prompts)
+                        };
+                    }
+                }
+            }
+            return Task.FromResult(_cachedPromptsList);
         }
 
         private async Task<GetPromptResult> HandlePromptsGetAsync(GetPromptRequestParams requestParams, CancellationToken cancellationToken)
@@ -215,11 +252,20 @@ namespace ModelContextProtocol.Server
 
         private Task<ListResourcesResult> HandleResourcesListAsync(ListResourcesRequestParams requestParams, CancellationToken cancellationToken)
         {
-            var result = new ListResourcesResult
+            if (_cachedResourcesList == null)
             {
-                Resources = new List<Resource>(_resources)
-            };
-            return Task.FromResult(result);
+                lock (_cacheLock)
+                {
+                    if (_cachedResourcesList == null)
+                    {
+                        _cachedResourcesList = new ListResourcesResult
+                        {
+                            Resources = new List<Resource>(_resources)
+                        };
+                    }
+                }
+            }
+            return Task.FromResult(_cachedResourcesList);
         }
 
         private async Task<ReadResourceResult> HandleResourcesReadAsync(ReadResourceRequestParams requestParams, CancellationToken cancellationToken)
