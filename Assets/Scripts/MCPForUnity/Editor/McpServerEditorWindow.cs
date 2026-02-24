@@ -32,6 +32,24 @@ namespace ModelContextProtocol.Editor
             window.Show();
         }
 
+        private void OnEnable()
+        {
+            EditorApplication.update += OnEditorUpdate;
+        }
+
+        private void OnDisable()
+        {
+            EditorApplication.update -= OnEditorUpdate;
+        }
+
+        private void OnEditorUpdate()
+        {
+            if (_isRunning)
+            {
+                Repaint();
+            }
+        }
+
         private void OnGUI()
         {
             if (!_stylesInitialized)
@@ -117,6 +135,16 @@ namespace ModelContextProtocol.Editor
             GUI.color = statusColor;
             EditorGUILayout.LabelField($"● {statusText}", _statusStyle);
             GUI.color = originalColor;
+
+            if (_isRunning)
+            {
+                int connectedClients = _serverComponent?.ConnectedClients ?? 0;
+                var clientColor = connectedClients > 0 ? Color.cyan : Color.gray;
+                var clientText = connectedClients > 0 ? $"{connectedClients} client(s) connected" : "No clients connected";
+                GUI.color = clientColor;
+                EditorGUILayout.LabelField($"  ○ {clientText}", _statusStyle);
+                GUI.color = originalColor;
+            }
 
             EditorGUILayout.EndVertical();
         }

@@ -37,6 +37,7 @@ namespace ModelContextProtocol.Protocol
 
         public string SessionId { get; private set; }
         public bool IsConnected => _state == StateConnected;
+        public int ConnectedClients => _sseSessions.Count;
         public IMessageReader<JsonRpcMessage> MessageReader { get; }
 
         public HttpListenerServerTransport(int port = 3000, string path = "/mcp", ILogger logger = null)
