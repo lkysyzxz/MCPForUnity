@@ -122,9 +122,11 @@ public string Description { get; set; }
 |------|-------------|-----------------|
 | `Vector2` | `paramName_x`, `paramName_y` (number) | Individual properties |
 | `Vector3` | `paramName_x`, `paramName_y`, `paramName_z` (number) | Individual properties |
+| `Vector4` | `paramName_x`, `paramName_y`, `paramName_z`, `paramName_w` (number) | Individual properties |
 | `Quaternion` | `paramName_x`, `paramName_y`, `paramName_z`, `paramName_w` (number) | Individual properties |
 | `Vector2[]` / `List<Vector2>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1, x2,y2, ...]` |
 | `Vector3[]` / `List<Vector3>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1,z1, x2,y2,z2, ...]` |
+| `Vector4[]` / `List<Vector4>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1,z1,w1, x2,y2,z2,w2, ...]` |
 | `Quaternion[]` / `List<Quaternion>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1,z1,w1, x2,y2,z2,w2, ...]` |
 
 ### Example Tool with Vector Array

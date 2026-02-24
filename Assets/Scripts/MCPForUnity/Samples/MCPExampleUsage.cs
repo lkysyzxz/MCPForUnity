@@ -500,6 +500,40 @@ namespace ModelContextProtocol.Samples
             };
         }
 
+        [McpServerTool(Name = "log_vector4", Description = "Vector4传参测试")]
+        public static CallToolResult LogVector4(
+            [McpArgument(Description = "四维向量", Required = true)] Vector4 vector)
+        {
+            Debug.Log($"Vector4: {vector.x}, {vector.y}, {vector.z}, {vector.w}");
+            
+            return new CallToolResult()
+            {
+                Content = new List<ContentBlock>()
+                {
+                    new TextContentBlock { Text = $"Vector4: ({vector.x}, {vector.y}, {vector.z}, {vector.w})" }
+                }
+            };
+        }
+
+        [McpServerTool(Name = "log_vector4_array", Description = "Vector4数组传参测试")]
+        public static CallToolResult LogVector4Array(
+            [McpArgument(Description = "四维向量数组 [x1,y1,z1,w1, x2,y2,z2,w2, ...]", Required = true)] Vector4[] vectors)
+        {
+            Debug.Log($"Vector4 Array Count: {vectors.Length}");
+            for (int i = 0; i < vectors.Length; i++)
+            {
+                Debug.Log($"Vector4[{i}]: {vectors[i].x}, {vectors[i].y}, {vectors[i].z}, {vectors[i].w}");
+            }
+            
+            return new CallToolResult()
+            {
+                Content = new List<ContentBlock>()
+                {
+                    new TextContentBlock { Text = $"Logged {vectors.Length} Vector4 values" }
+                }
+            };
+        }
+
         [McpServerTool("set_transform", Description = "Set position, rotation and scale of a GameObject")]
         public static CallToolResult SetTransform(
             [McpArgument(Description = "Path to the GameObject", Required = true)] string path,

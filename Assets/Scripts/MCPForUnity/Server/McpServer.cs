@@ -533,6 +533,7 @@ namespace ModelContextProtocol.Server
         {
             return type == typeof(UnityEngine.Vector2) ||
                    type == typeof(UnityEngine.Vector3) ||
+                   type == typeof(UnityEngine.Vector4) ||
                    type == typeof(UnityEngine.Quaternion);
         }
 
@@ -547,6 +548,8 @@ namespace ModelContextProtocol.Server
                 return typeof(UnityEngine.Vector2);
             if (type == typeof(UnityEngine.Vector3[]) || type == typeof(List<UnityEngine.Vector3>))
                 return typeof(UnityEngine.Vector3);
+            if (type == typeof(UnityEngine.Vector4[]) || type == typeof(List<UnityEngine.Vector4>))
+                return typeof(UnityEngine.Vector4);
             if (type == typeof(UnityEngine.Quaternion[]) || type == typeof(List<UnityEngine.Quaternion>))
                 return typeof(UnityEngine.Quaternion);
             return null;
@@ -556,6 +559,7 @@ namespace ModelContextProtocol.Server
         {
             if (vectorType == typeof(UnityEngine.Vector2)) return 2;
             if (vectorType == typeof(UnityEngine.Vector3)) return 3;
+            if (vectorType == typeof(UnityEngine.Vector4)) return 4;
             if (vectorType == typeof(UnityEngine.Quaternion)) return 4;
             return 0;
         }
@@ -570,6 +574,10 @@ namespace ModelContextProtocol.Server
             else if (type == typeof(UnityEngine.Vector3))
             {
                 axes = new[] { "x", "y", "z" };
+            }
+            else if (type == typeof(UnityEngine.Vector4))
+            {
+                axes = new[] { "x", "y", "z", "w" };
             }
             else // Quaternion
             {
@@ -638,6 +646,7 @@ namespace ModelContextProtocol.Server
         {
             if (vectorType == typeof(UnityEngine.Vector2)) return "x1,y1, x2,y2, ...";
             if (vectorType == typeof(UnityEngine.Vector3)) return "x1,y1,z1, x2,y2,z2, ...";
+            if (vectorType == typeof(UnityEngine.Vector4)) return "x1,y1,z1,w1, x2,y2,z2,w2, ...";
             if (vectorType == typeof(UnityEngine.Quaternion)) return "x1,y1,z1,w1, x2,y2,z2,w2, ...";
             return "";
         }
@@ -653,6 +662,10 @@ namespace ModelContextProtocol.Server
                 if (type == typeof(UnityEngine.Vector3) && defaultValue is UnityEngine.Vector3 v3)
                 {
                     return new[] { v3.x, v3.y, v3.z };
+                }
+                if (type == typeof(UnityEngine.Vector4) && defaultValue is UnityEngine.Vector4 v4)
+                {
+                    return new[] { v4.x, v4.y, v4.z, v4.w };
                 }
                 if (type == typeof(UnityEngine.Quaternion) && defaultValue is UnityEngine.Quaternion q)
                 {
@@ -689,6 +702,15 @@ namespace ModelContextProtocol.Server
                 float y = GetVectorComponent(args, paramName, "y", defaults, 1);
                 float z = GetVectorComponent(args, paramName, "z", defaults, 2);
                 return new UnityEngine.Vector3(x, y, z);
+            }
+            
+            if (type == typeof(UnityEngine.Vector4))
+            {
+                float x = GetVectorComponent(args, paramName, "x", defaults, 0);
+                float y = GetVectorComponent(args, paramName, "y", defaults, 1);
+                float z = GetVectorComponent(args, paramName, "z", defaults, 2);
+                float w = GetVectorComponent(args, paramName, "w", defaults, 3);
+                return new UnityEngine.Vector4(x, y, z, w);
             }
             
             if (type == typeof(UnityEngine.Quaternion))
@@ -766,6 +788,10 @@ namespace ModelContextProtocol.Server
             {
                 return ParseVector3Array(flatArray, vectorCount, type);
             }
+            if (elementType == typeof(UnityEngine.Vector4))
+            {
+                return ParseVector4Array(flatArray, vectorCount, type);
+            }
             if (elementType == typeof(UnityEngine.Quaternion))
             {
                 return ParseQuaternionArray(flatArray, vectorCount, type);
@@ -802,6 +828,22 @@ namespace ModelContextProtocol.Server
             if (targetType == typeof(List<UnityEngine.Vector3>))
             {
                 return new List<UnityEngine.Vector3>(array);
+            }
+            return array;
+        }
+
+        private object ParseVector4Array(float[] flatArray, int count, Type targetType)
+        {
+            var array = new UnityEngine.Vector4[count];
+            for (int i = 0; i < count; i++)
+            {
+                int offset = i * 4;
+                array[i] = new UnityEngine.Vector4(flatArray[offset], flatArray[offset + 1], flatArray[offset + 2], flatArray[offset + 3]);
+            }
+
+            if (targetType == typeof(List<UnityEngine.Vector4>))
+            {
+                return new List<UnityEngine.Vector4>(array);
             }
             return array;
         }
