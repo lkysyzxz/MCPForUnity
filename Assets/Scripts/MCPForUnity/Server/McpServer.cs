@@ -361,6 +361,10 @@ namespace ModelContextProtocol.Server
                         {
                             args[i] = ParseVectorArgument(requestParams.Arguments, param);
                         }
+                        else if (IsVectorArrayType(param.ParameterType))
+                        {
+                            args[i] = ParseVectorArrayArgument(requestParams.Arguments, param);
+                        }
                         else if (requestParams.Arguments != null && requestParams.Arguments.TryGetValue(param.Name, out var token))
                         {
                             args[i] = token.ToObject(param.ParameterType);
@@ -482,6 +486,13 @@ namespace ModelContextProtocol.Server
                     continue;
                 }
 
+                // 处理 Unity 向量数组类型 - 使用扁平化浮点数组
+                if (IsVectorArrayType(param.ParameterType))
+                {
+                    AddVectorArraySchema(properties, required, paramName, paramDesc, param.ParameterType, isRequired);
+                    continue;
+                }
+
                 var propSchema = GeneratePropertySchema(param.ParameterType);
 
                 if (!string.IsNullOrEmpty(paramDesc))
@@ -523,6 +534,30 @@ namespace ModelContextProtocol.Server
             return type == typeof(UnityEngine.Vector2) ||
                    type == typeof(UnityEngine.Vector3) ||
                    type == typeof(UnityEngine.Quaternion);
+        }
+
+        private bool IsVectorArrayType(Type type)
+        {
+            return GetVectorArrayElementType(type) != null;
+        }
+
+        private Type GetVectorArrayElementType(Type type)
+        {
+            if (type == typeof(UnityEngine.Vector2[]) || type == typeof(List<UnityEngine.Vector2>))
+                return typeof(UnityEngine.Vector2);
+            if (type == typeof(UnityEngine.Vector3[]) || type == typeof(List<UnityEngine.Vector3>))
+                return typeof(UnityEngine.Vector3);
+            if (type == typeof(UnityEngine.Quaternion[]) || type == typeof(List<UnityEngine.Quaternion>))
+                return typeof(UnityEngine.Quaternion);
+            return null;
+        }
+
+        private int GetVectorComponentCount(Type vectorType)
+        {
+            if (vectorType == typeof(UnityEngine.Vector2)) return 2;
+            if (vectorType == typeof(UnityEngine.Vector3)) return 3;
+            if (vectorType == typeof(UnityEngine.Quaternion)) return 4;
+            return 0;
         }
 
         private void AddVectorProperties(JObject properties, JArray required, string paramName, string paramDesc, Type type, bool isRequired, ParameterInfo param)
@@ -574,6 +609,37 @@ namespace ModelContextProtocol.Server
                     required.Add(propName);
                 }
             }
+        }
+
+        private void AddVectorArraySchema(JObject properties, JArray required, string paramName, string paramDesc, Type type, bool isRequired)
+        {
+            Type elementType = GetVectorArrayElementType(type);
+            int componentCount = GetVectorComponentCount(elementType);
+            string typeHint = elementType.Name;
+
+            var propSchema = new JObject
+            {
+                ["type"] = "array",
+                ["items"] = new JObject { ["type"] = "number" },
+                ["description"] = string.IsNullOrEmpty(paramDesc)
+                    ? $"Flat array of {typeHint} values [{GetAxisHint(elementType)}, ...]"
+                    : paramDesc
+            };
+
+            properties[paramName] = propSchema;
+
+            if (isRequired)
+            {
+                required.Add(paramName);
+            }
+        }
+
+        private string GetAxisHint(Type vectorType)
+        {
+            if (vectorType == typeof(UnityEngine.Vector2)) return "x1,y1, x2,y2, ...";
+            if (vectorType == typeof(UnityEngine.Vector3)) return "x1,y1,z1, x2,y2,z2, ...";
+            if (vectorType == typeof(UnityEngine.Quaternion)) return "x1,y1,z1,w1, x2,y2,z2,w2, ...";
+            return "";
         }
 
         private float[] ExtractVectorDefaults(object defaultValue, Type type)
@@ -658,6 +724,108 @@ namespace ModelContextProtocol.Server
             }
             
             return 0f;
+        }
+
+        private object ParseVectorArrayArgument(JObject args, ParameterInfo param)
+        {
+            string paramName = param.Name;
+            Type type = param.ParameterType;
+            Type elementType = GetVectorArrayElementType(type);
+            int componentCount = GetVectorComponentCount(elementType);
+
+            if (args == null || !args.TryGetValue(paramName, out var token) || token == null)
+            {
+                return type.IsArray ? System.Array.CreateInstance(elementType, 0) : null;
+            }
+
+            JArray jArray = token as JArray;
+            if (jArray == null)
+            {
+                return type.IsArray ? System.Array.CreateInstance(elementType, 0) : null;
+            }
+
+            float[] flatArray = jArray.ToObject<float[]>();
+            if (flatArray == null || flatArray.Length == 0)
+            {
+                return type.IsArray ? System.Array.CreateInstance(elementType, 0) : CreateEmptyList(elementType);
+            }
+
+            if (flatArray.Length % componentCount != 0)
+            {
+                throw new McpException(McpErrorCode.InvalidParams, 
+                    $"Vector array '{paramName}' has invalid length {flatArray.Length}. Must be divisible by {componentCount}.");
+            }
+
+            int vectorCount = flatArray.Length / componentCount;
+
+            if (elementType == typeof(UnityEngine.Vector2))
+            {
+                return ParseVector2Array(flatArray, vectorCount, type);
+            }
+            if (elementType == typeof(UnityEngine.Vector3))
+            {
+                return ParseVector3Array(flatArray, vectorCount, type);
+            }
+            if (elementType == typeof(UnityEngine.Quaternion))
+            {
+                return ParseQuaternionArray(flatArray, vectorCount, type);
+            }
+
+            return null;
+        }
+
+        private object ParseVector2Array(float[] flatArray, int count, Type targetType)
+        {
+            var array = new UnityEngine.Vector2[count];
+            for (int i = 0; i < count; i++)
+            {
+                int offset = i * 2;
+                array[i] = new UnityEngine.Vector2(flatArray[offset], flatArray[offset + 1]);
+            }
+
+            if (targetType == typeof(List<UnityEngine.Vector2>))
+            {
+                return new List<UnityEngine.Vector2>(array);
+            }
+            return array;
+        }
+
+        private object ParseVector3Array(float[] flatArray, int count, Type targetType)
+        {
+            var array = new UnityEngine.Vector3[count];
+            for (int i = 0; i < count; i++)
+            {
+                int offset = i * 3;
+                array[i] = new UnityEngine.Vector3(flatArray[offset], flatArray[offset + 1], flatArray[offset + 2]);
+            }
+
+            if (targetType == typeof(List<UnityEngine.Vector3>))
+            {
+                return new List<UnityEngine.Vector3>(array);
+            }
+            return array;
+        }
+
+        private object ParseQuaternionArray(float[] flatArray, int count, Type targetType)
+        {
+            var array = new UnityEngine.Quaternion[count];
+            for (int i = 0; i < count; i++)
+            {
+                int offset = i * 4;
+                array[i] = new UnityEngine.Quaternion(flatArray[offset], flatArray[offset + 1], flatArray[offset + 2], flatArray[offset + 3]);
+            }
+
+            if (targetType == typeof(List<UnityEngine.Quaternion>))
+            {
+                return new List<UnityEngine.Quaternion>(array);
+            }
+            return array;
+        }
+
+        private object CreateEmptyList(Type elementType)
+        {
+            var listType = typeof(List<>).MakeGenericType(elementType);
+            return Activator.CreateInstance(listType);
         }
 
         private JObject GeneratePropertySchema(Type type)

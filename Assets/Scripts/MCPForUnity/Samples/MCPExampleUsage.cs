@@ -443,6 +443,63 @@ namespace ModelContextProtocol.Samples
             };
         }
 
+        [McpServerTool(Name = "log_position_array", Description = "Vector3数组传参测试")]
+        public static CallToolResult LogPositionArray(
+            [McpArgument(Description = "三维坐标数组 [x1,y1,z1, x2,y2,z2, ...]", Required = true)] Vector3[] positions)
+        {
+            Debug.Log($"Vector3 Array Count: {positions.Length}");
+            for (int i = 0; i < positions.Length; i++)
+            {
+                Debug.Log($"Position[{i}]: {positions[i].x}, {positions[i].y}, {positions[i].z}");
+            }
+            
+            return new CallToolResult()
+            {
+                Content = new List<ContentBlock>()
+                {
+                    new TextContentBlock { Text = $"Logged {positions.Length} Vector3 positions" }
+                }
+            };
+        }
+
+        [McpServerTool(Name = "log_position2d_array", Description = "Vector2数组传参测试")]
+        public static CallToolResult LogPosition2DArray(
+            [McpArgument(Description = "二维坐标数组 [x1,y1, x2,y2, ...]", Required = true)] Vector2[] positions)
+        {
+            Debug.Log($"Vector2 Array Count: {positions.Length}");
+            for (int i = 0; i < positions.Length; i++)
+            {
+                Debug.Log($"Position2D[{i}]: {positions[i].x}, {positions[i].y}");
+            }
+            
+            return new CallToolResult()
+            {
+                Content = new List<ContentBlock>()
+                {
+                    new TextContentBlock { Text = $"Logged {positions.Length} Vector2 positions" }
+                }
+            };
+        }
+
+        [McpServerTool(Name = "log_quaternion_array", Description = "Quaternion数组传参测试")]
+        public static CallToolResult LogQuaternionArray(
+            [McpArgument(Description = "四元数数组 [x1,y1,z1,w1, x2,y2,z2,w2, ...]", Required = true)] Quaternion[] rotations)
+        {
+            Debug.Log($"Quaternion Array Count: {rotations.Length}");
+            for (int i = 0; i < rotations.Length; i++)
+            {
+                Debug.Log($"Rotation[{i}]: {rotations[i].x}, {rotations[i].y}, {rotations[i].z}, {rotations[i].w}");
+            }
+            
+            return new CallToolResult()
+            {
+                Content = new List<ContentBlock>()
+                {
+                    new TextContentBlock { Text = $"Logged {rotations.Length} Quaternion rotations" }
+                }
+            };
+        }
+
         [McpServerTool("set_transform", Description = "Set position, rotation and scale of a GameObject")]
         public static CallToolResult SetTransform(
             [McpArgument(Description = "Path to the GameObject", Required = true)] string path,
