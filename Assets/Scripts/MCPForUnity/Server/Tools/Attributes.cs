@@ -13,6 +13,7 @@ namespace ModelContextProtocol.Server
         public bool Destructive { get; set; } = true;
         public bool Idempotent { get; set; }
         public bool OpenWorld { get; set; } = true;
+        public bool Disable { get; set; }
 
         public McpServerToolAttribute() { }
 

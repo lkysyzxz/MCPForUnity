@@ -23,6 +23,9 @@ namespace ModelContextProtocol.Protocol
 
         [JsonProperty("_meta", NullValueHandling = NullValueHandling.Ignore)]
         public JObject Meta { get; set; }
+
+        [JsonIgnore]
+        public bool IsDisabled { get; set; }
     }
 
     public class ToolAnnotations
