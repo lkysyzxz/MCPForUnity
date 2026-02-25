@@ -18,6 +18,7 @@ namespace ModelContextProtocol.Server
         private readonly ILogger _logger;
 
         private readonly McpServerPrimitiveCollection<Tool> _tools = new McpServerPrimitiveCollection<Tool>();
+        private readonly List<Tool> _allTools = new List<Tool>();
         private readonly McpServerPrimitiveCollection<Prompt> _prompts = new McpServerPrimitiveCollection<Prompt>();
         private readonly McpServerPrimitiveCollection<Resource> _resources = new McpServerPrimitiveCollection<Resource>();
         private readonly Dictionary<string, Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>>> _toolHandlers = new Dictionary<string, Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>>>();
@@ -34,6 +35,7 @@ namespace ModelContextProtocol.Server
         private readonly object _cacheLock = new object();
 
         public McpServerPrimitiveCollection<Tool> Tools => _tools;
+        public IReadOnlyList<Tool> AllTools => _allTools;
         public McpServerPrimitiveCollection<Prompt> Prompts => _prompts;
         public McpServerPrimitiveCollection<Resource> Resources => _resources;
         public IMcpTaskStore TaskStore => _taskStore;
@@ -371,7 +373,8 @@ namespace ModelContextProtocol.Server
             {
                 Name = name,
                 Description = description,
-                InputSchema = attr.InputSchema ?? GenerateInputSchema(method)
+                InputSchema = attr.InputSchema ?? GenerateInputSchema(method),
+                IsDisabled = attr.Disable
             };
 
             bool isStatic = method.IsStatic;
@@ -491,7 +494,11 @@ namespace ModelContextProtocol.Server
                 }
             };
 
-            AddTool(tool, handler);
+            _allTools.Add(tool);
+            if (!tool.IsDisabled)
+            {
+                AddTool(tool, handler);
+            }
         }
 
         private JObject GenerateInputSchema(MethodInfo method)
