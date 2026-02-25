@@ -37,6 +37,7 @@ namespace ModelContextProtocol.Server
         public McpServerPrimitiveCollection<Prompt> Prompts => _prompts;
         public McpServerPrimitiveCollection<Resource> Resources => _resources;
         public IMcpTaskStore TaskStore => _taskStore;
+        public int ConnectedClients => _transport?.ConnectedClients ?? 0;
 
         public McpServer(McpServerOptions options = null, ILogger logger = null, IMcpTaskStore taskStore = null)
         {

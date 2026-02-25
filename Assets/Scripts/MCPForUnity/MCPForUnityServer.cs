@@ -30,6 +30,7 @@ namespace ModelContextProtocol.Unity
         public McpServer Server => _server;
         public bool IsRunning => _isRunning;
         public int Port => _port;
+        public int ConnectedClients => _server?.ConnectedClients ?? 0;
 
         public event Action OnServerStarted;
         public event Action OnServerStopped;
