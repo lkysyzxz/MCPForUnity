@@ -1,21 +1,14 @@
 using System;
-using System.Threading;
-using System.Threading.Tasks;
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using ModelContextProtocol.Unity;
 
 namespace ModelContextProtocol.Editor
 {
     public class McpServerEditorWindow : EditorWindow
     {
-        private McpServer _server;
-        private int _port = 3000;
-        private bool _isRunning;
-        private CancellationTokenSource _cts;
-
         private Vector2 _scrollPosition;
         private int _currentPage = 0;
         private int _itemsPerPage = 10;
@@ -27,7 +20,7 @@ namespace ModelContextProtocol.Editor
         private GUIStyle _statusStyle;
         private bool _stylesInitialized;
 
-        [MenuItem("Tools/McpServerEditorWindow")]
+        [MenuItem("Tools/MCP For Unity/Server Window")]
         public static void ShowWindow()
         {
             var window = GetWindow<McpServerEditorWindow>("MCP Server");
@@ -47,7 +40,7 @@ namespace ModelContextProtocol.Editor
 
         private void OnEditorUpdate()
         {
-            if (_isRunning)
+            if (GlobalEditorMcpServer.IsRunning)
             {
                 Repaint();
             }
@@ -110,44 +103,47 @@ namespace ModelContextProtocol.Editor
 
         private void DrawServerControls()
         {
+            bool isRunning = GlobalEditorMcpServer.IsRunning;
+
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("Server Settings", EditorStyles.boldLabel);
             EditorGUILayout.Space(5);
 
-            EditorGUI.BeginDisabledGroup(_isRunning);
-            _port = EditorGUILayout.IntField("Port", _port);
-            _port = Mathf.Clamp(_port, 1, 65535);
+            EditorGUI.BeginDisabledGroup(isRunning);
+            int port = GlobalEditorMcpServer.Port;
+            port = EditorGUILayout.IntField("Port", port);
+            GlobalEditorMcpServer.Port = Mathf.Clamp(port, 1, 65535);
             EditorGUI.EndDisabledGroup();
 
             EditorGUILayout.Space(5);
 
             EditorGUILayout.BeginHorizontal();
-            GUI.enabled = !_isRunning;
+            GUI.enabled = !isRunning;
             if (GUILayout.Button("▶ Start", GUILayout.Height(30)))
             {
-                StartServer();
+                GlobalEditorMcpServer.StartServer();
             }
-            GUI.enabled = _isRunning;
+            GUI.enabled = isRunning;
             if (GUILayout.Button("■ Stop", GUILayout.Height(30)))
             {
-                StopServer();
+                GlobalEditorMcpServer.StopServer();
             }
             GUI.enabled = true;
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(5);
 
-            var statusColor = _isRunning ? Color.green : Color.gray;
-            var statusText = _isRunning ? $"Running (http://localhost:{_port}/mcp)" : "Stopped";
+            var statusColor = isRunning ? Color.green : Color.gray;
+            var statusText = isRunning ? $"Running (http://localhost:{GlobalEditorMcpServer.Port}/mcp)" : "Stopped";
 
             var originalColor = GUI.color;
             GUI.color = statusColor;
             EditorGUILayout.LabelField($"● {statusText}", _statusStyle);
             GUI.color = originalColor;
 
-            if (_isRunning)
+            if (isRunning)
             {
-                int connectedClients = _server?.ConnectedClients ?? 0;
+                int connectedClients = GlobalEditorMcpServer.Server?.ConnectedClients ?? 0;
                 var clientColor = connectedClients > 0 ? Color.cyan : Color.gray;
                 var clientText = connectedClients > 0 ? $"{connectedClients} client(s) connected" : "No clients connected";
                 GUI.color = clientColor;
@@ -160,7 +156,7 @@ namespace ModelContextProtocol.Editor
 
         private void DrawToolList()
         {
-            var tools = _server?.AllTools;
+            var tools = GlobalEditorMcpServer.Server?.AllTools;
             int toolCount = tools?.Count ?? 0;
 
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
@@ -205,7 +201,7 @@ namespace ModelContextProtocol.Editor
 
         private void DrawPagination()
         {
-            var tools = _server?.AllTools;
+            var tools = GlobalEditorMcpServer.Server?.AllTools;
             int toolCount = tools?.Count ?? 0;
             int totalPages = Mathf.Max(1, Mathf.CeilToInt((float)toolCount / _itemsPerPage));
 
@@ -242,85 +238,6 @@ namespace ModelContextProtocol.Editor
 
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.Space(5);
-        }
-
-        private async void StartServer()
-        {
-            if (_isRunning) return;
-
-            try
-            {
-                _cts = new CancellationTokenSource();
-
-                var options = new McpServerOptions
-                {
-                    Port = _port,
-                    ServerInfo = new Implementation
-                    {
-                        Name = "UnityMCPEditor",
-                        Version = "1.0.0"
-                    },
-                    Instructions = "Unity MCP Editor Server - Control Unity Editor from AI assistants"
-                };
-
-                _server = new McpServer(options, new UnityLoggerImpl());
-                _server.RegisterToolsFromClass(typeof(EditorToolsList));
-
-                await _server.StartAsync(_cts.Token);
-
-                _isRunning = true;
-                _currentPage = 0;
-                Repaint();
-
-                Debug.Log($"[MCP Editor] Server started at http://localhost:{_port}/mcp");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[MCP Editor] Failed to start server: {ex.Message}");
-                CleanupServer();
-            }
-        }
-
-        private async void StopServer()
-        {
-            if (!_isRunning || _server == null) return;
-
-            try
-            {
-                _cts?.Cancel();
-                await _server.DisposeAsync();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning($"[MCP Editor] Error stopping server: {ex.Message}");
-            }
-            finally
-            {
-                CleanupServer();
-            }
-        }
-
-        private void CleanupServer()
-        {
-            _cts?.Dispose();
-            _cts = null;
-            _server = null;
-            _isRunning = false;
-            Repaint();
-        }
-
-        private void OnDestroy()
-        {
-            if (_isRunning && _server != null)
-            {
-                try
-                {
-                    _cts?.Cancel();
-                    _server.DisposeAsync().AsTask().Wait(1000);
-                }
-                catch { }
-                CleanupServer();
-            }
         }
     }
 }
