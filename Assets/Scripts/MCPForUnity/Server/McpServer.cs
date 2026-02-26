@@ -1045,8 +1045,8 @@ namespace ModelContextProtocol.Server
 
         public async ValueTask DisposeAsync()
         {
-            await _sessionHandler.DisposeAsync();
             await _transport.DisposeAsync();
+            await _sessionHandler.DisposeAsync();
             _logger.Log(LogLevel.Information, "MCP Server disposed");
         }
     }

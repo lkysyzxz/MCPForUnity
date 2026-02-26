@@ -327,11 +327,14 @@ namespace ModelContextProtocol.Protocol
             try
             {
                 _listener.Stop();
-                _listener.Close();
             }
             catch { }
 
-            _cts.Dispose();
+            try
+            {
+                _listener.Close();
+            }
+            catch { }
 
             if (_listenerTask != null)
             {
@@ -342,6 +345,7 @@ namespace ModelContextProtocol.Protocol
                 catch { }
             }
 
+            _cts.Dispose();
             _logger.Log(LogLevel.Information, "MCP Server stopped");
         }
 
