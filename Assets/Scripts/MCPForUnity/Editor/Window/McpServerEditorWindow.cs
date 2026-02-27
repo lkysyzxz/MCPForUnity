@@ -12,6 +12,8 @@ namespace ModelContextProtocol.Editor
         private Vector2 _scrollPosition;
         private int _currentPage = 0;
         private int _itemsPerPage = 10;
+        private bool _resourcesEnabled = true;
+        private bool _fileWatchingEnabled = false;
 
         private GUIStyle _headerStyle;
         private GUIStyle _toolNameStyle;
@@ -31,6 +33,8 @@ namespace ModelContextProtocol.Editor
         private void OnEnable()
         {
             EditorApplication.update += OnEditorUpdate;
+            _resourcesEnabled = GlobalEditorMcpServer.ResourcesEnabled;
+            _fileWatchingEnabled = GlobalEditorMcpServer.FileWatchingEnabled;
         }
 
         private void OnDisable()
@@ -113,6 +117,25 @@ namespace ModelContextProtocol.Editor
             int port = GlobalEditorMcpServer.Port;
             port = EditorGUILayout.IntField("Port", port);
             GlobalEditorMcpServer.Port = Mathf.Clamp(port, 1, 65535);
+            
+            EditorGUILayout.Space(5);
+            
+            _resourcesEnabled = EditorGUILayout.Toggle("Enable Resources", _resourcesEnabled);
+            GlobalEditorMcpServer.ResourcesEnabled = _resourcesEnabled;
+            
+            if (_resourcesEnabled)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(30);
+                EditorGUILayout.BeginVertical();
+                
+                _fileWatchingEnabled = EditorGUILayout.Toggle("Enable File Watching", _fileWatchingEnabled);
+                GlobalEditorMcpServer.FileWatchingEnabled = _fileWatchingEnabled;
+                
+                EditorGUILayout.EndVertical();
+                EditorGUILayout.EndHorizontal();
+            }
+            
             EditorGUI.EndDisabledGroup();
 
             EditorGUILayout.Space(5);

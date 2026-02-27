@@ -1043,6 +1043,30 @@ namespace ModelContextProtocol.Server
             await _sessionHandler.SendNotificationAsync(notification, cancellationToken);
         }
 
+        public async Task NotifyResourceUpdatedAsync(string uri, CancellationToken cancellationToken = default)
+        {
+            var notification = new JsonRpcNotification
+            {
+                Method = NotificationMethods.ResourceUpdatedNotification,
+                Params = JToken.FromObject(new ResourceUpdatedNotificationParams { Uri = uri })
+            };
+
+            await _sessionHandler.SendNotificationAsync(notification, cancellationToken);
+            _logger.Log(LogLevel.Debug, $"Resource update notification sent: {uri}");
+        }
+
+        public async Task NotifyResourceListChangedAsync(CancellationToken cancellationToken = default)
+        {
+            var notification = new JsonRpcNotification
+            {
+                Method = NotificationMethods.ResourceListChangedNotification,
+                Params = JToken.FromObject(new ResourceListChangedNotificationParams())
+            };
+
+            await _sessionHandler.SendNotificationAsync(notification, cancellationToken);
+            _logger.Log(LogLevel.Debug, "Resource list changed notification sent");
+        }
+
         public async ValueTask DisposeAsync()
         {
             await _transport.DisposeAsync();
