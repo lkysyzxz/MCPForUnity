@@ -14,6 +14,9 @@ namespace ModelContextProtocol.Editor
         private static McpServer _server;
         private static CancellationTokenSource _cts;
         private static int _port = 8090;
+        private static bool _resourcesEnabled = false;
+        private static bool _fileWatchingEnabled = false;
+        private static EditorResourcesService _resourcesService;
 
         public static McpServer Server => _server;
         public static bool IsRunning => _server != null;
@@ -23,6 +26,20 @@ namespace ModelContextProtocol.Editor
             get => _port;
             set => _port = Mathf.Clamp(value, 1, 65535);
         }
+
+        public static bool ResourcesEnabled
+        {
+            get => _resourcesEnabled;
+            set => _resourcesEnabled = value;
+        }
+
+        public static bool FileWatchingEnabled
+        {
+            get => _fileWatchingEnabled;
+            set => _fileWatchingEnabled = value;
+        }
+
+        public static EditorResourcesService ResourcesService => _resourcesService;
 
         public static async void StartServer()
         {
@@ -50,6 +67,13 @@ namespace ModelContextProtocol.Editor
                 _server = new McpServer(options, new UnityLoggerImpl());
                 _server.RegisterToolsFromClass(typeof(EditorToolsList));
 
+                if (_resourcesEnabled)
+                {
+                    _resourcesService = new EditorResourcesService();
+                    _resourcesService.RegisterResources(_server, _fileWatchingEnabled);
+                    Debug.Log($"[MCP Editor] Resources enabled. Registered {_resourcesService.GetResources().Count} resources.");
+                }
+
                 await _server.StartAsync(_cts.Token);
 
                 Debug.Log($"[MCP Editor] Server started at http://localhost:{_port}/mcp");
@@ -71,6 +95,8 @@ namespace ModelContextProtocol.Editor
 
             try
             {
+                _resourcesService?.StopWatching();
+                
                 await _server.DisposeAsync();
                 Debug.Log("[MCP Editor] Server stopped");
             }
@@ -89,6 +115,7 @@ namespace ModelContextProtocol.Editor
             _cts?.Dispose();
             _cts = null;
             _server = null;
+            _resourcesService = null;
         }
     }
 }

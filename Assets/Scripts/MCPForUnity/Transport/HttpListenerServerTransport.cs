@@ -383,8 +383,15 @@ namespace ModelContextProtocol.Protocol
 
             public void Dispose()
             {
-                _tcs.TrySetResult(true);
-                _writer?.Dispose();
+                try
+                {
+                    _tcs.TrySetResult(true);
+                    _writer?.Dispose();
+                }
+                catch (Exception e)
+                {
+                    _logger.Log(LogLevel.Error, $"Dispose Session Exception: {e.Message}");
+                }
             }
         }
     }

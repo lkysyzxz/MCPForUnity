@@ -33,6 +33,7 @@ namespace ModelContextProtocol.Server
         private readonly ILogger _logger;
         private readonly ConcurrentDictionary<RequestId, TaskCompletionSource<JsonRpcMessage>> _pendingRequests = new ConcurrentDictionary<RequestId, TaskCompletionSource<JsonRpcMessage>>();
         private readonly ConcurrentDictionary<RequestId, CancellationTokenSource> _handlingRequests = new ConcurrentDictionary<RequestId, CancellationTokenSource>();
+        private readonly ConcurrentDictionary<string, HashSet<string>> _resourceSubscriptions = new ConcurrentDictionary<string, HashSet<string>>();
         private readonly string _sessionId = Guid.NewGuid().ToString("N");
 
         private CancellationTokenSource _messageProcessingCts;
@@ -340,11 +341,41 @@ namespace ModelContextProtocol.Server
 
         private Task<JsonRpcMessage> HandleResourcesSubscribeAsync(JsonRpcRequest request, CancellationToken cancellationToken)
         {
+            var @params = request.Params?.ToObject<SubscribeRequestParams>();
+            if (@params == null || string.IsNullOrEmpty(@params.Uri))
+            {
+                return Task.FromResult<JsonRpcMessage>(CreateErrorResponse(request.Id, McpErrorCode.InvalidParams, "Resource URI is required"));
+            }
+
+            string uri = @params.Uri;
+            var subscribers = _resourceSubscriptions.GetOrAdd(uri, _ => new HashSet<string>());
+            lock (subscribers)
+            {
+                subscribers.Add(_sessionId);
+            }
+
+            _logger.Log(LogLevel.Debug, $"Resource subscribed: {uri} by session {_sessionId}");
             return Task.FromResult<JsonRpcMessage>(CreateResponse(request.Id, new EmptyResult()));
         }
 
         private Task<JsonRpcMessage> HandleResourcesUnsubscribeAsync(JsonRpcRequest request, CancellationToken cancellationToken)
         {
+            var @params = request.Params?.ToObject<UnsubscribeRequestParams>();
+            if (@params == null || string.IsNullOrEmpty(@params.Uri))
+            {
+                return Task.FromResult<JsonRpcMessage>(CreateErrorResponse(request.Id, McpErrorCode.InvalidParams, "Resource URI is required"));
+            }
+
+            string uri = @params.Uri;
+            if (_resourceSubscriptions.TryGetValue(uri, out var subscribers))
+            {
+                lock (subscribers)
+                {
+                    subscribers.Remove(_sessionId);
+                }
+            }
+
+            _logger.Log(LogLevel.Debug, $"Resource unsubscribed: {uri} by session {_sessionId}");
             return Task.FromResult<JsonRpcMessage>(CreateResponse(request.Id, new EmptyResult()));
         }
 
@@ -550,6 +581,15 @@ namespace ModelContextProtocol.Server
 
         public async ValueTask DisposeAsync()
         {
+            foreach (var kvp in _resourceSubscriptions.ToArray())
+            {
+                lock (kvp.Value)
+                {
+                    kvp.Value.Remove(_sessionId);
+                }
+            }
+            _resourceSubscriptions.Clear();
+
             _messageProcessingCts?.Cancel();
 
             if (_messageProcessingTask != null)
@@ -570,6 +610,45 @@ namespace ModelContextProtocol.Server
             _handlingRequests.Clear();
 
             _logger.Log(LogLevel.Information, $"Session disposed: {_sessionId}");
+        }
+
+        public bool IsResourceSubscribed(string uri)
+        {
+            if (_resourceSubscriptions.TryGetValue(uri, out var subscribers))
+            {
+                lock (subscribers)
+                {
+                    return subscribers.Contains(_sessionId);
+                }
+            }
+            return false;
+        }
+
+        public async Task NotifyResourceUpdatedAsync(string uri, CancellationToken cancellationToken = default)
+        {
+            if (!_resourceSubscriptions.TryGetValue(uri, out var subscribers) || subscribers.Count == 0)
+                return;
+
+            var notification = new JsonRpcNotification
+            {
+                Method = NotificationMethods.ResourceUpdatedNotification,
+                Params = JToken.FromObject(new ResourceUpdatedNotificationParams { Uri = uri })
+            };
+
+            await SendNotificationAsync(notification, cancellationToken);
+            _logger.Log(LogLevel.Debug, $"Resource update notification sent: {uri}");
+        }
+
+        public async Task NotifyResourceListChangedAsync(CancellationToken cancellationToken = default)
+        {
+            var notification = new JsonRpcNotification
+            {
+                Method = NotificationMethods.ResourceListChangedNotification,
+                Params = JToken.FromObject(new ResourceListChangedNotificationParams())
+            };
+
+            await SendNotificationAsync(notification, cancellationToken);
+            _logger.Log(LogLevel.Debug, "Resource list changed notification sent");
         }
     }
 }
