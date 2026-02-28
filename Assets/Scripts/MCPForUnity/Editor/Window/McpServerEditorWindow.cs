@@ -200,15 +200,32 @@ namespace ModelContextProtocol.Editor
                 {
                     var tool = tools[i];
                     EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                    if (tool.IsDisabled)
+                    
+                    if (!tool.IsValid)
+                    {
+                        var errorStyle = new GUIStyle(EditorStyles.label)
+                        {
+                            normal = { textColor = Color.red },
+                            fontStyle = FontStyle.Bold
+                        };
+                        EditorGUILayout.LabelField($"✗ {tool.Name} [Invalid]", errorStyle);
+                        EditorGUILayout.LabelField(tool.Description ?? "No description", _toolDescStyle);
+                        if (!string.IsNullOrEmpty(tool.ValidationError))
+                        {
+                            EditorGUILayout.HelpBox(tool.ValidationError, MessageType.Error);
+                        }
+                    }
+                    else if (tool.IsDisabled)
                     {
                         EditorGUILayout.LabelField($"○ {tool.Name} [Disabled]", _disabledToolNameStyle);
+                        EditorGUILayout.LabelField(tool.Description ?? "No description", _toolDescStyle);
                     }
                     else
                     {
-                        EditorGUILayout.LabelField($"● {tool.Name}", _toolNameStyle);
+                        EditorGUILayout.LabelField($"✓ {tool.Name}", _toolNameStyle);
+                        EditorGUILayout.LabelField(tool.Description ?? "No description", _toolDescStyle);
                     }
-                    EditorGUILayout.LabelField(tool.Description ?? "No description", _toolDescStyle);
+                    
                     EditorGUILayout.EndVertical();
                     EditorGUILayout.Space(2);
                 }

@@ -51,7 +51,7 @@ namespace ModelContextProtocol.Server
         }
     }
 
-    [AttributeUsage(AttributeTargets.Parameter)]
+    [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field)]
     public class McpArgumentAttribute : Attribute
     {
         public string Name { get; set; }

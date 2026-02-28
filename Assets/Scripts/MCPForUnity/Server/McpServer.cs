@@ -369,20 +369,41 @@ namespace ModelContextProtocol.Server
             string name = !string.IsNullOrEmpty(attr.Name) ? attr.Name : method.Name;
             string description = attr.Description ?? "";
 
-            var tool = new Tool
+            try
             {
-                Name = name,
-                Description = description,
-                InputSchema = attr.InputSchema ?? GenerateInputSchema(method),
-                IsDisabled = attr.Disable
-            };
+                var tool = new Tool
+                {
+                    Name = name,
+                    Description = description,
+                    InputSchema = attr.InputSchema ?? GenerateInputSchema(method),
+                    IsDisabled = attr.Disable,
+                    IsValid = true
+                };
 
-            bool isStatic = method.IsStatic;
-            object instance = null;
+                bool isStatic = method.IsStatic;
+                object instance = null;
 
-            if (!isStatic)
+                if (!isStatic)
+                {
+                    instance = Activator.CreateInstance(declaringType);
+                }
+
+            }
+            catch (McpException ex) when (ex.ErrorCode == McpErrorCode.InvalidParams)
             {
-                instance = Activator.CreateInstance(declaringType);
+                var invalidTool = new Tool
+                {
+                    Name = name,
+                    Description = description,
+                    InputSchema = JObject.Parse("{\"type\":\"object\"}"),
+                    IsDisabled = true,
+                    IsValid = false,
+                    ValidationError = ex.Message
+                };
+                
+                _allTools.Add(invalidTool);
+                _logger?.Warning($"Tool '{name}' validation failed: {ex.Message}");
+                return;
             }
 
             Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>> handler = async (requestParams, ct) =>
@@ -414,6 +435,14 @@ namespace ModelContextProtocol.Server
                         else if (IsVectorArrayType(param.ParameterType))
                         {
                             args[i] = ParseVectorArrayArgument(requestParams.Arguments, param);
+                        }
+                        else if (IsCustomTypeArray(param.ParameterType))
+                        {
+                            args[i] = ParseCustomTypeArrayArgument(requestParams.Arguments, param);
+                        }
+                        else if (IsCustomType(param.ParameterType))
+                        {
+                            args[i] = ParseCustomTypeArgument(requestParams.Arguments, param);
                         }
                         else if (requestParams.Arguments != null && requestParams.Arguments.TryGetValue(param.Name, out var token))
                         {
@@ -547,6 +576,43 @@ namespace ModelContextProtocol.Server
                     continue;
                 }
 
+                if (IsCustomTypeArray(param.ParameterType))
+                {
+                    var itemType = GetCustomArrayElementType(param.ParameterType);
+                    var (isValid, error) = ValidateCustomType(itemType);
+                    if (!isValid)
+                    {
+                        throw new McpException(McpErrorCode.InvalidParams, 
+                            $"Tool '{method.Name}' has invalid custom type array parameter '{param.Name}': {error}");
+                    }
+                    
+                    var itemSchema = GenerateCustomTypeSchema(itemType, "");
+                    var arraySchema = new JObject
+                    {
+                        ["type"] = "array",
+                        ["items"] = itemSchema,
+                        ["description"] = paramDesc
+                    };
+                    properties[paramName] = arraySchema;
+                    if (isRequired) required.Add(paramName);
+                    continue;
+                }
+
+                if (IsCustomType(param.ParameterType))
+                {
+                    var (isValid, error) = ValidateCustomType(param.ParameterType);
+                    if (!isValid)
+                    {
+                        throw new McpException(McpErrorCode.InvalidParams, 
+                            $"Tool '{method.Name}' has invalid custom type parameter '{param.Name}': {error}");
+                    }
+                    
+                    var customSchema = GenerateCustomTypeSchema(param.ParameterType, paramDesc);
+                    properties[paramName] = customSchema;
+                    if (isRequired) required.Add(paramName);
+                    continue;
+                }
+
                 var propSchema = GeneratePropertySchema(param.ParameterType);
 
                 if (!string.IsNullOrEmpty(paramDesc))
@@ -616,6 +682,216 @@ namespace ModelContextProtocol.Server
             if (vectorType == typeof(UnityEngine.Vector4)) return 4;
             if (vectorType == typeof(UnityEngine.Quaternion)) return 4;
             return 0;
+        }
+
+        private bool IsCustomType(Type type)
+        {
+            if (type == null) return false;
+            if (type.IsPrimitive) return false;
+            if (type == typeof(string)) return false;
+            if (type == typeof(decimal)) return false;
+            if (type == typeof(DateTime)) return false;
+            if (type == typeof(Guid)) return false;
+            if (type.IsArray) return false;
+            if (typeof(System.Collections.IEnumerable).IsAssignableFrom(type) && type != typeof(string)) return false;
+            if (type.IsEnum) return false;
+            if (type == typeof(object)) return false;
+            
+            if (type.Namespace != null && type.Namespace.StartsWith("UnityEngine"))
+                return false;
+            
+            if (type.Namespace != null && (type.Namespace == "System" || type.Namespace.StartsWith("System.")))
+                return false;
+            
+            return type.IsClass || type.IsValueType;
+        }
+
+        private bool IsCustomTypeArray(Type type)
+        {
+            return GetCustomArrayElementType(type) != null;
+        }
+
+        private Type GetCustomArrayElementType(Type type)
+        {
+            if (type.IsArray)
+            {
+                var elementType = type.GetElementType();
+                if (IsCustomType(elementType))
+                    return elementType;
+            }
+            
+            if (type.IsGenericType)
+            {
+                var genericDef = type.GetGenericTypeDefinition();
+                if (genericDef == typeof(List<>) || 
+                    genericDef == typeof(IList<>) || 
+                    genericDef == typeof(IEnumerable<>) ||
+                    genericDef == typeof(ICollection<>) ||
+                    genericDef == typeof(IReadOnlyList<>) ||
+                    genericDef == typeof(IReadOnlyCollection<>))
+                {
+                    var elementType = type.GetGenericArguments()[0];
+                    if (IsCustomType(elementType))
+                        return elementType;
+                }
+            }
+            
+            return null;
+        }
+
+        private (bool isValid, string error) ValidateCustomType(Type type, HashSet<Type> visited = null)
+        {
+            if (visited == null) visited = new HashSet<Type>();
+            
+            if (!visited.Add(type))
+                return (true, null);
+            
+            if (!IsCustomType(type))
+                return (true, null);
+            
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
+            var validFields = new List<FieldInfo>();
+            
+            foreach (var field in fields)
+            {
+                var jsonAttr = field.GetCustomAttribute<JsonPropertyAttribute>();
+                var mcpAttr = field.GetCustomAttribute<McpArgumentAttribute>();
+                
+                if (jsonAttr == null || mcpAttr == null)
+                    continue;
+                
+                validFields.Add(field);
+                
+                if (IsCustomType(field.FieldType) || IsCustomTypeArray(field.FieldType))
+                {
+                    var fieldType = field.FieldType;
+                    if (fieldType.IsArray)
+                        fieldType = fieldType.GetElementType();
+                    else if (fieldType.IsGenericType)
+                        fieldType = fieldType.GetGenericArguments()[0];
+                    
+                    var (nestedValid, nestedError) = ValidateCustomType(fieldType, visited);
+                    if (!nestedValid)
+                        return (false, $"Field '{field.Name}': {nestedError}");
+                }
+            }
+            
+            if (validFields.Count == 0)
+                return (false, "No valid fields with [JsonProperty] and [McpArgument] attributes found");
+            
+            return (true, null);
+        }
+
+        private JObject GenerateCustomTypeSchema(Type type, string description, HashSet<Type> visited = null)
+        {
+            if (visited == null) visited = new HashSet<Type>();
+            
+            var schema = new JObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JObject(),
+                ["required"] = new JArray()
+            };
+            
+            if (!string.IsNullOrEmpty(description))
+                schema["description"] = description;
+            
+            if (!visited.Add(type))
+                return schema;
+            
+            var properties = (JObject)schema["properties"];
+            var required = (JArray)schema["required"];
+            
+            var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
+            foreach (var field in fields)
+            {
+                var jsonAttr = field.GetCustomAttribute<JsonPropertyAttribute>();
+                var mcpAttr = field.GetCustomAttribute<McpArgumentAttribute>();
+                
+                if (jsonAttr == null || mcpAttr == null)
+                    continue;
+                
+                string fieldName = jsonAttr.PropertyName ?? field.Name;
+                string fieldDesc = mcpAttr.Description ?? "";
+                bool isRequired = mcpAttr.Required;
+                
+                JObject fieldSchema;
+                
+                if (IsCustomType(field.FieldType))
+                {
+                    fieldSchema = GenerateCustomTypeSchema(field.FieldType, fieldDesc, visited);
+                }
+                else if (IsCustomTypeArray(field.FieldType))
+                {
+                    var itemType = GetCustomArrayElementType(field.FieldType);
+                    var itemSchema = GenerateCustomTypeSchema(itemType, "", visited);
+                    
+                    fieldSchema = new JObject
+                    {
+                        ["type"] = "array",
+                        ["items"] = itemSchema,
+                        ["description"] = fieldDesc
+                    };
+                }
+                else
+                {
+                    fieldSchema = GeneratePropertySchema(field.FieldType);
+                    if (!string.IsNullOrEmpty(fieldDesc))
+                        fieldSchema["description"] = fieldDesc;
+                }
+                
+                properties[fieldName] = fieldSchema;
+                
+                if (isRequired)
+                    required.Add(fieldName);
+            }
+            
+            if (required.Count == 0)
+                schema.Remove("required");
+            
+            return schema;
+        }
+
+        private object ParseCustomTypeArgument(JObject arguments, ParameterInfo param)
+        {
+            if (arguments == null || !arguments.TryGetValue(param.Name, out var token))
+            {
+                return param.HasDefaultValue 
+                    ? param.DefaultValue 
+                    : (param.ParameterType.IsValueType ? Activator.CreateInstance(param.ParameterType) : null);
+            }
+            
+            try
+            {
+                return token.ToObject(param.ParameterType);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error($"Failed to parse custom type argument '{param.Name}': {ex.Message}");
+                throw new McpException(McpErrorCode.InvalidParams, 
+                    $"Invalid parameter '{param.Name}': {ex.Message}");
+            }
+        }
+
+        private object ParseCustomTypeArrayArgument(JObject arguments, ParameterInfo param)
+        {
+            if (arguments == null || !arguments.TryGetValue(param.Name, out var token))
+            {
+                return param.HasDefaultValue 
+                    ? param.DefaultValue 
+                    : null;
+            }
+            
+            try
+            {
+                return token.ToObject(param.ParameterType);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error($"Failed to parse custom type array argument '{param.Name}': {ex.Message}");
+                throw new McpException(McpErrorCode.InvalidParams, 
+                    $"Invalid parameter '{param.Name}': {ex.Message}");
+            }
         }
 
         private void AddVectorProperties(JObject properties, JArray required, string paramName, string paramDesc, Type type, bool isRequired, ParameterInfo param)
