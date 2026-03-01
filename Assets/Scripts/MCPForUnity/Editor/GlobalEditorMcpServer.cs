@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Samples.InstanceTools;
 using ModelContextProtocol.Server;
 using ModelContextProtocol.Unity;
 
