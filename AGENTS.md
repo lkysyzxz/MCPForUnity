@@ -455,6 +455,98 @@ public static class PersonTools
 // Register: server.RegisterToolsFromClass(typeof(PersonTools));
 ```
 
+## Instance Tool Support
+
+### Overview
+Register tools from class instances, allowing multiple instances of the same type to be registered with unique IDs.
+
+### Defining Instance Tool Class
+Use `[McpInstanceTool]` attribute on the class:
+
+```csharp
+[McpInstanceTool(Name = "Player", Description = "Player instance tools")]
+public class PlayerInstance
+{
+    public int Health { get; set; }
+    public string Name { get; set; }
+
+    [McpServerTool(Description = "Get player health")]
+    public int GetHealth()
+    {
+        return Health;
+    }
+
+    [McpServerTool(Description = "Set player health")]
+    public CallToolResult SetHealth(
+        [McpArgument(Description = "Health value", Required = true)] int value)
+    {
+        Health = value;
+        return new CallToolResult
+        {
+            Content = new List<ContentBlock>
+            {
+                new TextContentBlock { Text = $"Health set to {Health}" }
+            }
+        };
+    }
+}
+```
+
+### Registering Instance Tools
+
+```csharp
+// Create instances
+var player1 = new PlayerInstance { Name = "Alice", Health = 100 };
+var player2 = new PlayerInstance { Name = "Bob", Health = 80 };
+
+// Register with unique IDs
+_server.RegisterToolsFromInstance(player1, "player_1");
+_server.RegisterToolsFromInstance(player2, "player_2");
+
+// Tool names will be:
+// - player_1.GetHealth
+// - player_1.SetHealth
+// - player_2.GetHealth
+// - player_2.SetHealth
+```
+
+### Unregistering Instance Tools
+
+```csharp
+_server.UnregisterInstanceTools("player_1");
+```
+
+### Tool Name Format
+
+| Type | Format | Example |
+|------|--------|---------|
+| Static Tool | `{methodName}` | `test_address` |
+| Instance Tool | `{instanceId}.{methodName}` | `player_1.GetHealth` |
+
+### Description Enhancement
+
+Instance tool descriptions are automatically prefixed with `[Instance: {instanceId}]`:
+
+- Original: `"Get player health"`
+- Instance: `"[Instance: player_1] Get player health"`
+
+### API Reference
+
+```csharp
+// Register instance tools
+void RegisterToolsFromInstance(object instance, string instanceId)
+
+// Unregister all tools for an instance
+void UnregisterInstanceTools(string instanceId)
+```
+
+### Important Notes
+
+- Instance ID must be unique across all registered instances
+- Only methods with `[McpServerTool]` attribute are registered
+- Instance must be kept alive for tools to work (server holds reference)
+- Always unregister instances when they're no longer needed to prevent memory leaks
+
 ## Testing
 
 - Test assembly: `ModelContextProtocol.Unity.Tests`

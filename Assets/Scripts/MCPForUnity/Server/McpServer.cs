@@ -26,6 +26,9 @@ namespace ModelContextProtocol.Server
         private readonly Dictionary<string, Func<GetPromptRequestParams, CancellationToken, Task<GetPromptResult>>> _promptHandlers = new Dictionary<string, Func<GetPromptRequestParams, CancellationToken, Task<GetPromptResult>>>();
         private readonly Dictionary<string, Func<ReadResourceRequestParams, CancellationToken, Task<ReadResourceResult>>> _resourceHandlers = new Dictionary<string, Func<ReadResourceRequestParams, CancellationToken, Task<ReadResourceResult>>>();
 
+        private readonly Dictionary<string, object> _instances = new Dictionary<string, object>();
+        private readonly Dictionary<string, List<string>> _instanceToolNames = new Dictionary<string, List<string>>();
+
         private readonly IMcpTaskStore _taskStore;
         private Task _runTask;
 
@@ -362,6 +365,236 @@ namespace ModelContextProtocol.Server
                 {
                     RegisterToolFromMethod(method, attr, type);
                 }
+            }
+        }
+
+        public void RegisterToolsFromInstance(object instance, string instanceId)
+        {
+            if (instance == null)
+                throw new ArgumentNullException(nameof(instance));
+            
+            if (string.IsNullOrEmpty(instanceId))
+                throw new ArgumentException("Instance ID cannot be null or empty", nameof(instanceId));
+            
+            if (_instances.ContainsKey(instanceId))
+            {
+                _logger?.Log(LogLevel.Warning, $"Instance with ID '{instanceId}' already exists. Unregister it first.");
+                return;
+            }
+            
+            var type = instance.GetType();
+            var classAttr = type.GetCustomAttribute<McpInstanceToolAttribute>();
+            
+            _instances[instanceId] = instance;
+            _instanceToolNames[instanceId] = new List<string>();
+            
+            var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+            
+            foreach (var method in methods)
+            {
+                var methodAttr = method.GetCustomAttribute<McpServerToolAttribute>();
+                if (methodAttr != null && !methodAttr.Disable)
+                {
+                    RegisterInstanceToolFromMethod(method, methodAttr, instance, instanceId, classAttr);
+                }
+            }
+            
+            _logger?.Log(LogLevel.Information, $"Registered instance tools for '{instanceId}' ({methods.Count()} methods)");
+        }
+
+        public void UnregisterInstanceTools(string instanceId)
+        {
+            if (string.IsNullOrEmpty(instanceId))
+                return;
+            
+            if (!_instanceToolNames.TryGetValue(instanceId, out var toolNames))
+            {
+                _logger?.Log(LogLevel.Warning, $"No instance tools found for ID '{instanceId}'");
+                return;
+            }
+            
+            foreach (var toolName in toolNames)
+            {
+                _tools.Remove(t => t.Name == toolName);
+                _toolHandlers.Remove(toolName);
+                _allTools.RemoveAll(t => t.Name == toolName);
+            }
+            
+            _instanceToolNames.Remove(instanceId);
+            _instances.Remove(instanceId);
+            
+            lock (_cacheLock)
+            {
+                _cachedToolsList = null;
+            }
+            
+            _logger?.Log(LogLevel.Information, $"Unregistered {toolNames.Count} tools for instance '{instanceId}'");
+        }
+
+        private void RegisterInstanceToolFromMethod(MethodInfo method, McpServerToolAttribute attr, 
+            object instance, string instanceId, McpInstanceToolAttribute classAttr)
+        {
+            string baseName = !string.IsNullOrEmpty(attr.Name) ? attr.Name : method.Name;
+            string toolName = $"{instanceId}.{baseName}";
+            
+            string baseDescription = attr.Description ?? "";
+            string classDescription = classAttr?.Description ?? "";
+            string description = $"[Instance: {instanceId}] {baseDescription}";
+            
+            Tool tool;
+            
+            try
+            {
+                tool = new Tool
+                {
+                    Name = toolName,
+                    Description = description,
+                    InputSchema = attr.InputSchema ?? GenerateInputSchema(method),
+                    IsDisabled = attr.Disable,
+                    IsValid = true
+                };
+            }
+            catch (McpException ex) when (ex.ErrorCode == McpErrorCode.InvalidParams)
+            {
+                var invalidTool = new Tool
+                {
+                    Name = toolName,
+                    Description = description,
+                    InputSchema = JObject.Parse("{\"type\":\"object\"}"),
+                    IsDisabled = true,
+                    IsValid = false,
+                    ValidationError = ex.Message
+                };
+                
+                _allTools.Add(invalidTool);
+                _instanceToolNames[instanceId].Add(toolName);
+                _logger?.Log(LogLevel.Warning, $"Instance tool '{toolName}' validation failed: {ex.Message}");
+                return;
+            }
+
+            Func<CallToolRequestParams, CancellationToken, Task<CallToolResult>> handler = async (requestParams, ct) =>
+            {
+                try
+                {
+                    var parameters = method.GetParameters();
+                    object[] args = new object[parameters.Length];
+
+                    for (int i = 0; i < parameters.Length; i++)
+                    {
+                        var param = parameters[i];
+                        if (param.ParameterType == typeof(CancellationToken))
+                        {
+                            args[i] = ct;
+                        }
+                        else if (param.ParameterType == typeof(CallToolRequestParams))
+                        {
+                            args[i] = requestParams;
+                        }
+                        else if (param.ParameterType == typeof(JObject))
+                        {
+                            args[i] = requestParams.Arguments;
+                        }
+                        else if (IsVectorType(param.ParameterType))
+                        {
+                            args[i] = ParseVectorArgument(requestParams.Arguments, param);
+                        }
+                        else if (IsVectorArrayType(param.ParameterType))
+                        {
+                            args[i] = ParseVectorArrayArgument(requestParams.Arguments, param);
+                        }
+                        else if (IsCustomTypeArray(param.ParameterType))
+                        {
+                            args[i] = ParseCustomTypeArrayArgument(requestParams.Arguments, param);
+                        }
+                        else if (IsCustomType(param.ParameterType))
+                        {
+                            args[i] = ParseCustomTypeArgument(requestParams.Arguments, param);
+                        }
+                        else if (requestParams.Arguments != null && requestParams.Arguments.TryGetValue(param.Name, out var token))
+                        {
+                            args[i] = token.ToObject(param.ParameterType);
+                        }
+                        else if (param.HasDefaultValue)
+                        {
+                            args[i] = param.DefaultValue;
+                        }
+                        else
+                        {
+                            args[i] = param.ParameterType.IsValueType ? Activator.CreateInstance(param.ParameterType) : null;
+                        }
+                    }
+
+                    object result = method.Invoke(instance, args);
+
+                    if (result is Task<CallToolResult> taskResult)
+                    {
+                        return await taskResult;
+                    }
+                    else if (result is Task<string> taskString)
+                    {
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = await taskString }
+                            }
+                        };
+                    }
+                    else if (result is Task task)
+                    {
+                        await task;
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = "OK" }
+                            }
+                        };
+                    }
+                    else if (result is CallToolResult directResult)
+                    {
+                        return directResult;
+                    }
+                    else if (result is string text)
+                    {
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = text }
+                            }
+                        };
+                    }
+                    else
+                    {
+                        return new CallToolResult
+                        {
+                            Content = new List<ContentBlock>
+                            {
+                                new TextContentBlock { Text = result?.ToString() ?? "null" }
+                            }
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return new CallToolResult
+                    {
+                        IsError = true,
+                        Content = new List<ContentBlock>
+                        {
+                            new TextContentBlock { Text = $"Error: {ex.InnerException?.Message ?? ex.Message}" }
+                        }
+                    };
+                }
+            };
+
+            _allTools.Add(tool);
+            _instanceToolNames[instanceId].Add(toolName);
+            
+            if (!tool.IsDisabled)
+            {
+                AddTool(tool, handler);
             }
         }
 

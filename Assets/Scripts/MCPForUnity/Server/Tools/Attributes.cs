@@ -65,4 +65,18 @@ namespace ModelContextProtocol.Server
             Name = name;
         }
     }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class McpInstanceToolAttribute : Attribute
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+
+        public McpInstanceToolAttribute() { }
+
+        public McpInstanceToolAttribute(string name)
+        {
+            Name = name;
+        }
+    }
 }
