@@ -26,6 +26,12 @@ namespace ModelContextProtocol.Protocol
 
         [JsonIgnore]
         public bool IsDisabled { get; set; }
+
+        [JsonIgnore]
+        public bool IsValid { get; set; } = true;
+
+        [JsonIgnore]
+        public string ValidationError { get; set; }
     }
 
     public class ToolAnnotations

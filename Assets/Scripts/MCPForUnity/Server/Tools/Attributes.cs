@@ -51,7 +51,7 @@ namespace ModelContextProtocol.Server
         }
     }
 
-    [AttributeUsage(AttributeTargets.Parameter)]
+    [AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Field)]
     public class McpArgumentAttribute : Attribute
     {
         public string Name { get; set; }
@@ -61,6 +61,20 @@ namespace ModelContextProtocol.Server
         public McpArgumentAttribute() { }
 
         public McpArgumentAttribute(string name)
+        {
+            Name = name;
+        }
+    }
+
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public class McpInstanceToolAttribute : Attribute
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+
+        public McpInstanceToolAttribute() { }
+
+        public McpInstanceToolAttribute(string name)
         {
             Name = name;
         }

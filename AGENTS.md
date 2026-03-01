@@ -156,6 +156,222 @@ public static CallToolResult SetPathPoints(
 ```
 This represents 3 Vector3 points: (0,0,0), (1,2,3), (4,5,6)
 
+## Custom Type Parameter Support
+
+### Overview
+Support for custom types as tool parameters. Custom types are serialized as JSON objects with automatic schema generation.
+
+### Validation Rules (Strict Mode)
+- **Required**: Fields must have BOTH `[JsonProperty]` AND `[McpArgument]` attributes
+- If a field uses only one attribute, the type is marked as **invalid**
+- At least one valid field is required per custom type
+
+### Required Field Determination
+
+Required 状态由以下特性决定（优先级从高到低）：
+
+| Priority | Attribute | Effect |
+|----------|-----------|--------|
+| 1 | `[JsonRequired]` | Required = true (highest priority) |
+| 2 | `[McpArgument(Required = true)]` | Required = true (fallback) |
+| 3 | None | Required = false |
+
+Example:
+```csharp
+public class ExampleType
+{
+    // Using JsonRequired
+    [JsonProperty("name")]
+    [JsonRequired]
+    [McpArgument(Description = "Name")]
+    public string Name;  // Required = true (JsonRequired)
+    
+    // Using McpArgument.Required
+    [JsonProperty("email")]
+    [McpArgument(Description = "Email", Required = true)]
+    public string Email;  // Required = true
+    
+    // Optional field
+    [JsonProperty("phone")]
+    [McpArgument(Description = "Phone")]
+    public string Phone;  // Required = false
+}
+```
+
+### Supported Type Forms
+| Type | JSON Schema | Example |
+|------|-------------|---------|
+| Basic custom type | `{ "type": "object", "properties": {...} }` | `PersonInfo` |
+| Nested custom type | Nested object schema | `PersonInfo.Address` |
+| Custom type array | `{ "type": "array", "items": {...} }` | `PersonInfo[]`, `List<PersonInfo>` |
+| Mixed with primitive arrays | `{ "type": "array", "items": { "type": "string" } }` | `List<string>` |
+
+### Constraints
+- Public fields only (not properties)
+- Must be non-primitive, non-Unity, non-System types
+- Circular references handled gracefully
+
+### McpArgument.Name Limitation
+
+**For custom type fields**, `McpArgument.Name` is ignored. Field names are determined by `JsonProperty.PropertyName`.
+
+```csharp
+public class ExampleType
+{
+    // ✓ Correct: Only use JsonProperty for name
+    [JsonProperty("userName")]
+    [McpArgument(Description = "User name", Required = true)]
+    public string UserName;  // JSON field name: "userName"
+    
+    // ✗ Avoid: McpArgument.Name will be ignored
+    [JsonProperty("email")]
+    [McpArgument(Name = "userEmail", Description = "Email")]  // Name ignored
+    public string Email;  // JSON field name still: "email"
+}
+```
+
+**Note:** For Method parameters, `McpArgument.Name` is still effective.
+
+| Context | McpArgument.Name | JsonProperty.PropertyName |
+|---------|-----------------|--------------------------|
+| Method Parameter | ✓ Effective | N/A |
+| Custom Type Field | ✗ Ignored | ✓ Effective |
+
+A warning will be logged if `McpArgument.Name` conflicts with `JsonProperty.PropertyName`.
+
+### Example: Define Custom Types
+
+```csharp
+// Basic custom type
+public class AddressInfo
+{
+    [JsonProperty("street")]
+    [JsonRequired]  // Optional: mark as required
+    [McpArgument(Description = "街道名称")]
+    public string Street;
+
+    [JsonProperty("city")]
+    [McpArgument(Description = "城市名称", Required = true)]
+    public string City;
+
+    [JsonProperty("zipCode")]
+    [McpArgument(Description = "邮政编码")]
+    public string ZipCode;
+}
+
+// Nested custom type
+public class PersonInfo
+{
+    [JsonProperty("name")]
+    [McpArgument(Description = "姓名", Required = true)]
+    public string Name;
+
+    [JsonProperty("age")]
+    [McpArgument(Description = "年龄")]
+    public int Age;
+
+    [JsonProperty("address")]
+    [McpArgument(Description = "地址信息（嵌套对象）")]
+    public AddressInfo Address;
+}
+
+// Array custom type
+public class TeamInfo
+{
+    [JsonProperty("teamName")]
+    [McpArgument(Description = "团队名称", Required = true)]
+    public string TeamName;
+
+    [JsonProperty("members")]
+    [McpArgument(Description = "团队成员列表")]
+    public PersonInfo[] Members;
+}
+```
+
+### Example: Tool with Custom Type
+
+```csharp
+[McpServerTool("register_person", Description = "注册新用户")]
+public static CallToolResult RegisterPerson(
+    [McpArgument(Description = "用户信息", Required = true)]
+    PersonInfo person)
+{
+    return new CallToolResult
+    {
+        Content = new List<ContentBlock>
+        {
+            new TextContentBlock { Text = $"Registered: {person.Name}" }
+        }
+    };
+}
+
+[McpServerTool("create_team", Description = "创建团队")]
+public static CallToolResult CreateTeam(
+    [McpArgument(Description = "团队信息", Required = true)]
+    TeamInfo team)
+{
+    return new CallToolResult
+    {
+        Content = new List<ContentBlock>
+        {
+            new TextContentBlock { Text = $"Team '{team.TeamName}' with {team.Members?.Length ?? 0} members" }
+        }
+    };
+}
+```
+
+### Protocol Example
+```json
+{
+  "name": "register_person",
+  "arguments": {
+    "person": {
+      "name": "张三",
+      "age": 25,
+      "address": {
+        "city": "北京",
+        "zipCode": "100000"
+      }
+    }
+  }
+}
+```
+
+## UTF-8 Encoding
+
+### RFC 8259 Compliance
+All JSON request/response encoding enforces UTF-8 per RFC 8259 specification.
+
+### Chinese Character Handling
+- Request body: Read with `Encoding.UTF8`
+- Response body: Written with `Encoding.UTF8`
+- Content-Type: `application/json; charset=utf-8` / `text/event-stream; charset=utf-8`
+
+### Implementation Location
+`HttpListenerServerTransport.cs`:
+- `HandlePostRequestAsync()`: UTF-8 request reading (line 198)
+- `HandleGetRequestAsync()`: SSE stream encoding (line 160)
+- Response headers include `charset=utf-8`
+
+## Editor Window Features
+
+### Tool Status Display
+| Status | Icon | Color | Condition |
+|--------|------|-------|-----------|
+| Valid | ✓ | Green | `IsValid == true && !IsDisabled` |
+| Disabled | ○ | Gray | `IsDisabled == true` |
+| Invalid | ✗ | Red | `IsValid == false` |
+
+### Error Information Display
+- Invalid tools show `ValidationError` in a HelpBox
+- Red styling for tool name with "[Invalid]" suffix
+- Description still displayed below error
+
+### Window Access
+- Menu: `Tools > MCP For Unity > Server Window`
+- Shows all registered tools with status indicators
+- Pagination support for large tool lists
+
 ## Project Structure
 
 ```
@@ -178,7 +394,12 @@ Assets/Scripts/MCPForUnity/
 │   ├── UnityLogger.cs        # Logging abstraction
 │   └── MainThreadDispatcher.cs
 └── Samples/
-    └── MCPExampleUsage.cs    # Usage examples
+    ├── MCPExampleUsage.cs    # Usage examples
+    └── CustomTypes/          # Custom type examples
+        ├── PersonInfo.cs     # Nested custom type example
+        ├── TeamInfo.cs       # Array custom type example
+        ├── AddressInfo.cs    # Basic custom type example
+        └── InvalidCustomType.cs  # Invalid type for testing
 ```
 
 ## Key Types
@@ -187,7 +408,7 @@ Assets/Scripts/MCPForUnity/
 |------|---------|
 | `CallToolResult` | Tool execution result with `Content` list and `IsError` flag |
 | `ContentBlock` | Base for `TextContentBlock`, `ImageContentBlock` |
-| `Tool` | MCP tool definition with `Name`, `Description`, `InputSchema` |
+| `Tool` | MCP tool definition with `Name`, `Description`, `InputSchema`, `IsValid`, `ValidationError` |
 | `McpServer` | Main server class, use `AddTool()`, `RegisterToolsFromClass<T>()` |
 
 ## Adding New Tools
@@ -213,6 +434,126 @@ public static class MyTools
 }
 // Register: server.RegisterToolsFromClass(typeof(MyTools));
 ```
+
+### Method 3: With Custom Type
+```csharp
+public static class PersonTools
+{
+    [McpServerTool("update_user", Description = "Update user information")]
+    public static CallToolResult UpdateUser(
+        [McpArgument(Description = "User data", Required = true)] PersonInfo user)
+    {
+        return new CallToolResult
+        {
+            Content = new List<ContentBlock>
+            {
+                new TextContentBlock { Text = $"Updated: {user.Name}" }
+            }
+        };
+    }
+}
+// Register: server.RegisterToolsFromClass(typeof(PersonTools));
+```
+
+## Instance Tool Support
+
+### Overview
+Register tools from class instances, allowing multiple instances of the same type to be registered with unique IDs.
+
+### Defining Instance Tool Class
+Use `[McpInstanceTool]` attribute on the class:
+
+```csharp
+[McpInstanceTool(Name = "Player", Description = "Player instance tools")]
+public class PlayerInstance
+{
+    public int Health { get; set; }
+    public string Name { get; set; }
+
+    [McpServerTool(Description = "Get player health")]
+    public int GetHealth()
+    {
+        return Health;
+    }
+
+    [McpServerTool(Description = "Set player health")]
+    public CallToolResult SetHealth(
+        [McpArgument(Description = "Health value", Required = true)] int value)
+    {
+        Health = value;
+        return new CallToolResult
+        {
+            Content = new List<ContentBlock>
+            {
+                new TextContentBlock { Text = $"Health set to {Health}" }
+            }
+        };
+    }
+}
+```
+
+### Registering Instance Tools
+
+```csharp
+// Create instances
+var player1 = new PlayerInstance { Name = "Alice", Health = 100 };
+var player2 = new PlayerInstance { Name = "Bob", Health = 80 };
+
+// Register with unique IDs
+_server.RegisterToolsFromInstance(player1, "player_1");
+_server.RegisterToolsFromInstance(player2, "player_2");
+
+// Tool names will be:
+// - player_1.GetHealth
+// - player_1.SetHealth
+// - player_2.GetHealth
+// - player_2.SetHealth
+```
+
+### Unregistering Instance Tools
+
+```csharp
+_server.UnregisterInstanceTools("player_1");
+```
+
+### Tool Name Format
+
+| Type | Format | Example |
+|------|--------|---------|
+| Static Tool | `{methodName}` | `test_address` |
+| Instance Tool | `{instanceId}.{methodName}` | `player_1.GetHealth` |
+
+### Description Enhancement
+
+Instance tool descriptions are formatted as:
+`[Instance: {instanceId}] {classDescription} {methodDescription}`
+
+Where:
+- `{instanceId}`: The unique ID provided during registration
+- `{classDescription}`: Description from `[McpInstanceTool]` attribute
+- `{methodDescription}`: Description from `[McpServerTool]` attribute
+
+Example:
+- Class: `[McpInstanceTool(Description = "Player instance tools")]`
+- Method: `[McpServerTool(Description = "Get player health")]`
+- Result: `"[Instance: player_1] Player instance tools Get player health"`
+
+### API Reference
+
+```csharp
+// Register instance tools
+void RegisterToolsFromInstance(object instance, string instanceId)
+
+// Unregister all tools for an instance
+void UnregisterInstanceTools(string instanceId)
+```
+
+### Important Notes
+
+- Instance ID must be unique across all registered instances
+- Only methods with `[McpServerTool]` attribute are registered
+- Instance must be kept alive for tools to work (server holds reference)
+- Always unregister instances when they're no longer needed to prevent memory leaks
 
 ## Testing
 
