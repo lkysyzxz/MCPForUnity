@@ -7,17 +7,26 @@ using UnityEngine;
 
 public class GameManager : MonoBehaviour
 {
-    public MCPForUnityServer server;
-    // Start is called before the first frame update
+    private McpServerHost _host;
+
     async void Start()
     {
-        await server.StartServerAsync();
-        server.Server.RegisterToolsFromClass(typeof(CustomTools));
+        var options = new McpServerHostOptions
+        {
+            Port = 8090,
+            ServerName = "UnityMCP"
+        };
+
+        _host = new McpServerHost(options);
+        await _host.StartAsync();
+        _host.Server.RegisterToolsFromClass(typeof(CustomTools));
     }
-    
 
     private async void OnDestroy()
     {
-        await server.StopServerAsync();
+        if (_host != null)
+        {
+            await _host.DisposeAsync();
+        }
     }
 }

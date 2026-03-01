@@ -12,15 +12,17 @@ namespace ModelContextProtocol.Samples
 {
     public class MCPExampleUsage : MonoBehaviour
     {
-        private MCPForUnityServer _mcpServer;
+        private McpServerHost _host;
 
         private async void Start()
         {
-            _mcpServer = gameObject.AddComponent<MCPForUnityServer>();
-            
+            _host = new McpServerHost();
+
             await Task.Delay(1000);
-            
-            if (_mcpServer.IsRunning)
+
+            await _host.StartAsync();
+
+            if (_host.IsRunning)
             {
                 AddCustomTools();
             }
@@ -28,7 +30,7 @@ namespace ModelContextProtocol.Samples
 
         private void AddCustomTools()
         {
-            _mcpServer.AddCustomTool("create_cube", "Create a cube at specified position", async (args, ct) =>
+            _host.AddCustomTool("create_cube", "Create a cube at specified position", async (args, ct) =>
             {
                 float x = args?["x"]?.Value<float>() ?? 0f;
                 float y = args?["y"]?.Value<float>() ?? 0f;
@@ -57,7 +59,7 @@ namespace ModelContextProtocol.Samples
                 ""required"": []
             }"));
 
-            _mcpServer.AddCustomTool("move_gameobject", "Move a GameObject to a new position", async (args, ct) =>
+            _host.AddCustomTool("move_gameobject", "Move a GameObject to a new position", async (args, ct) =>
             {
                 string path = args?["path"]?.ToString();
                 float x = args?["x"]?.Value<float>() ?? 0f;
@@ -112,26 +114,36 @@ namespace ModelContextProtocol.Samples
 
         private async void OnDestroy()
         {
-            if (_mcpServer != null)
+            if (_host != null)
             {
-                await _mcpServer.StopServerAsync();
+                await _host.DisposeAsync();
             }
         }
     }
 
     public class MCPExampleWithAttributes : MonoBehaviour
     {
-        private MCPForUnityServer _mcpServer;
+        private McpServerHost _host;
 
         private async void Start()
         {
-            _mcpServer = gameObject.AddComponent<MCPForUnityServer>();
-            
+            _host = new McpServerHost();
+
             await Task.Delay(1000);
-            
-            if (_mcpServer.IsRunning && _mcpServer.Server != null)
+
+            await _host.StartAsync();
+
+            if (_host.IsRunning && _host.Server != null)
             {
-                _mcpServer.Server.RegisterToolsFromClass(typeof(CustomTools));
+                _host.Server.RegisterToolsFromClass(typeof(CustomTools));
+            }
+        }
+
+        private async void OnDestroy()
+        {
+            if (_host != null)
+            {
+                await _host.DisposeAsync();
             }
         }
     }

@@ -226,7 +226,6 @@ GameObject:
   m_Component:
   - component: {fileID: 746816161}
   - component: {fileID: 746816160}
-  - component: {fileID: 746816159}
   m_Layer: 0
   m_Name: GameObject
   m_TagString: Untagged
@@ -234,26 +233,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &746816159
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 746816158}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 581c5dbe92341436aacd642840a20e9d, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  _port: 8090
-  _serverName: UnityMCP
-  _serverVersion: 1.0.0
-  _instructions: Unity MCP Server - Control Unity from AI assistants
-  _logLevel: 2
-  _enableSceneTools: 1
-  _enableConsoleTools: 1
-  _enableTimeTools: 1
 --- !u!114 &746816160
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -266,7 +245,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 240bdf22af6c74d4bb0f6538862e8811, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  server: {fileID: 746816159}
 --- !u!4 &746816161
 Transform:
   m_ObjectHideFlags: 0

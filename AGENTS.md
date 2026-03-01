@@ -380,6 +380,9 @@ Assets/McpForUnity/
 │   ├── McpException.cs       # Custom exception types
 │   ├── McpErrorCode.cs       # Error codes enum
 │   ├── Throw.cs              # Argument validation helpers
+│   ├── IMcpServerHost.cs     # Server host interface
+│   ├── McpServerHost.cs      # Pure C# server host implementation
+│   ├── McpServerHostOptions.cs # Server host configuration
 │   └── Protocol/             # JSON-RPC and MCP protocol types
 ├── Server/
 │   ├── McpServer.cs          # Main server implementation
@@ -406,22 +409,98 @@ Assets/McpForUnity/
 
 | Type | Purpose |
 |------|---------|
+| `IMcpServerHost` | Interface for MCP server host, supports `IAsyncDisposable` |
+| `McpServerHost` | Pure C# implementation, auto-manages Unity lifecycle |
+| `McpServerHostOptions` | Configuration for server host (port, tools, etc.) |
 | `CallToolResult` | Tool execution result with `Content` list and `IsError` flag |
 | `ContentBlock` | Base for `TextContentBlock`, `ImageContentBlock` |
 | `Tool` | MCP tool definition with `Name`, `Description`, `InputSchema`, `IsValid`, `ValidationError` |
 | `McpServer` | Main server class, use `AddTool()`, `RegisterToolsFromClass<T>()` |
 
+## McpServerHost Usage
+
+### Overview
+`McpServerHost` is a pure C# implementation that does not require `MonoBehaviour`. It automatically listens to `Application.quitting` for lifecycle management.
+
+### Basic Usage
+```csharp
+using ModelContextProtocol.Unity;
+
+public class Example : MonoBehaviour
+{
+    private McpServerHost _host;
+
+    async void Start()
+    {
+        var options = new McpServerHostOptions
+        {
+            Port = 3000,
+            ServerName = "UnityMCP",
+            EnableSceneTools = true,
+            EnableConsoleTools = true,
+            EnableTimeTools = true
+        };
+
+        _host = new McpServerHost(options);
+        await _host.StartAsync();
+    }
+
+    private async void OnDestroy()
+    {
+        if (_host != null)
+        {
+            await _host.DisposeAsync();
+        }
+    }
+}
+```
+
+### Configuration Options
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `Port` | int | 3000 | Server port |
+| `ServerName` | string | "UnityMCP" | Server name |
+| `ServerVersion` | string | "1.0.0" | Server version |
+| `Instructions` | string | - | Server instructions |
+| `LogLevel` | LogLevel | Information | Log level |
+| `EnableSceneTools` | bool | true | Enable scene tools |
+| `EnableConsoleTools` | bool | true | Enable console tools |
+| `EnableTimeTools` | bool | true | Enable time tools |
+
+### Events
+```csharp
+_host.OnServerStarted += () => Debug.Log("Server started");
+_host.OnServerStopped += () => Debug.Log("Server stopped");
+_host.OnServerError += (error) => Debug.LogError(error);
+```
+
+### Interface Usage
+```csharp
+IMcpServerHost host = new McpServerHost(options);
+await host.StartAsync();
+await host.StopAsync();
+await host.DisposeAsync();
+```
+
 ## Adding New Tools
 
-### Method 1: Lambda Handler
+### Method 1: Lambda Handler (via Host)
 ```csharp
-_server.AddTool("tool_name", "Description", async (args, ct) =>
+_host.AddCustomTool("tool_name", "Description", async (args, ct) =>
 {
     return new CallToolResult { Content = ... };
 });
 ```
 
-### Method 2: Attribute-based
+### Method 2: Lambda Handler (via Server)
+```csharp
+_host.Server.AddTool("tool_name", "Description", async (args, ct) =>
+{
+    return new CallToolResult { Content = ... };
+});
+```
+
+### Method 3: Attribute-based
 ```csharp
 public static class MyTools
 {
@@ -432,10 +511,10 @@ public static class MyTools
         return new CallToolResult { Content = ... };
     }
 }
-// Register: server.RegisterToolsFromClass(typeof(MyTools));
+// Register: _host.Server.RegisterToolsFromClass(typeof(MyTools));
 ```
 
-### Method 3: With Custom Type
+### Method 4: With Custom Type
 ```csharp
 public static class PersonTools
 {
@@ -452,7 +531,7 @@ public static class PersonTools
         };
     }
 }
-// Register: server.RegisterToolsFromClass(typeof(PersonTools));
+// Register: _host.Server.RegisterToolsFromClass(typeof(PersonTools));
 ```
 
 ## Instance Tool Support
@@ -500,8 +579,8 @@ var player1 = new PlayerInstance { Name = "Alice", Health = 100 };
 var player2 = new PlayerInstance { Name = "Bob", Health = 80 };
 
 // Register with unique IDs
-_server.RegisterToolsFromInstance(player1, "player_1");
-_server.RegisterToolsFromInstance(player2, "player_2");
+_host.Server.RegisterToolsFromInstance(player1, "player_1");
+_host.Server.RegisterToolsFromInstance(player2, "player_2");
 
 // Tool names will be:
 // - player_1.GetHealth
@@ -513,7 +592,7 @@ _server.RegisterToolsFromInstance(player2, "player_2");
 ### Unregistering Instance Tools
 
 ```csharp
-_server.UnregisterInstanceTools("player_1");
+_host.Server.UnregisterInstanceTools("player_1");
 ```
 
 ### Tool Name Format

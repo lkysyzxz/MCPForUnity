@@ -9,44 +9,43 @@ using UnityEngine;
 
 namespace ModelContextProtocol.Unity
 {
-    public class MCPForUnityServer : MonoBehaviour
+    public class McpServerHost : IMcpServerHost
     {
-        [Header("Server Settings")]
-        [SerializeField] private int _port = 3000;
-        [SerializeField] private string _serverName = "UnityMCP";
-        [SerializeField] private string _serverVersion = "1.0.0";
-        [SerializeField] private string _instructions = "Unity MCP Server - Control Unity from AI assistants";
-        [SerializeField] private LogLevel _logLevel = LogLevel.Information;
-
-        [Header("Features")]
-        [SerializeField] private bool _enableSceneTools = true;
-        [SerializeField] private bool _enableConsoleTools = true;
-        [SerializeField] private bool _enableTimeTools = true;
-
+        private readonly McpServerHostOptions _options;
+        private readonly ILogger _logger;
         private McpServer _server;
         private CancellationTokenSource _cts;
         private bool _isRunning;
+        private bool _disposed;
 
         public McpServer Server => _server;
         public bool IsRunning => _isRunning;
-        public int Port => _port;
+        public int Port => _options.Port;
         public int ConnectedClients => _server?.ConnectedClients ?? 0;
 
         public event Action OnServerStarted;
         public event Action OnServerStopped;
         public event Action<string> OnServerError;
 
-        private void Awake()
+        public McpServerHost(McpServerHostOptions options = null, ILogger logger = null)
         {
-            UnityLogger.MinimumLevel = _logLevel;
+            _options = options ?? new McpServerHostOptions();
+            _logger = logger ?? new UnityLoggerImpl();
+
+            UnityLogger.MinimumLevel = _options.LogLevel;
+
+            Application.quitting += OnApplicationQuitting;
         }
 
-        private void OnApplicationQuit()
+        private void OnApplicationQuitting()
         {
-            _cts?.Cancel();
+            if (_isRunning)
+            {
+                _cts?.Cancel();
+            }
         }
 
-        public async Task StartServerAsync()
+        public async Task StartAsync()
         {
             if (_isRunning)
             {
@@ -58,25 +57,25 @@ namespace ModelContextProtocol.Unity
             {
                 _cts = new CancellationTokenSource();
 
-                var options = new McpServerOptions
+                var mcpOptions = new McpServerOptions
                 {
-                    Port = _port,
+                    Port = _options.Port,
                     ServerInfo = new Implementation
                     {
-                        Name = _serverName,
-                        Version = _serverVersion
+                        Name = _options.ServerName,
+                        Version = _options.ServerVersion
                     },
-                    Instructions = _instructions
+                    Instructions = _options.Instructions
                 };
 
-                _server = new McpServer(options, new UnityLoggerImpl());
+                _server = new McpServer(mcpOptions, _logger);
 
                 RegisterDefaultTools();
 
                 await _server.StartAsync(_cts.Token);
                 _isRunning = true;
 
-                Debug.Log($"[MCP] Server started at http://localhost:{_port}/mcp");
+                Debug.Log($"[MCP] Server started at http://localhost:{_options.Port}/mcp");
                 OnServerStarted?.Invoke();
             }
             catch (Exception ex)
@@ -86,7 +85,7 @@ namespace ModelContextProtocol.Unity
             }
         }
 
-        public async Task StopServerAsync()
+        public async Task StopAsync()
         {
             if (!_isRunning || _server == null) return;
 
@@ -100,9 +99,8 @@ namespace ModelContextProtocol.Unity
                 Debug.Log("[MCP] Server stopped");
                 OnServerStopped?.Invoke();
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                // Debug.LogError($"[MCP] Error stopping server: {ex.Message}");
                 Debug.Log("[MCP] Server stopped");
                 OnServerStopped?.Invoke();
             }
@@ -115,17 +113,17 @@ namespace ModelContextProtocol.Unity
 
         private void RegisterDefaultTools()
         {
-            if (_enableSceneTools)
+            if (_options.EnableSceneTools)
             {
                 RegisterSceneTools();
             }
 
-            if (_enableConsoleTools)
+            if (_options.EnableConsoleTools)
             {
                 RegisterConsoleTools();
             }
 
-            if (_enableTimeTools)
+            if (_options.EnableTimeTools)
             {
                 RegisterTimeTools();
             }
@@ -455,6 +453,19 @@ namespace ModelContextProtocol.Unity
                 T typedArgs = args != null ? args.ToObject<T>() : default;
                 return await handler(typedArgs, ct);
             });
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            Application.quitting -= OnApplicationQuitting;
+
+            if (_isRunning)
+            {
+                await StopAsync();
+            }
         }
     }
 }

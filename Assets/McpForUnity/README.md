@@ -10,6 +10,7 @@ Model Context Protocol (MCP) SDK for Unity - 允许 AI 助手（如 Claude、Cha
 - 支持 Tasks 异步任务系统
 - 预置 Unity 场景操作工具
 - 支持属性标注自动注册工具
+- 纯 C# 实现，不依赖 MonoBehaviour
 
 ## 安装要求
 
@@ -30,9 +31,7 @@ Model Context Protocol (MCP) SDK for Unity - 允许 AI 助手（如 Claude、Cha
 
 ## 快速开始
 
-### 1. 添加 MCPForUnityServer 组件
-
-在场景中创建一个 GameObject，添加 `MCPForUnityServer` 组件：
+### 1. 创建服务器实例
 
 ```csharp
 using ModelContextProtocol.Unity;
@@ -40,22 +39,45 @@ using UnityEngine;
 
 public class MCPServerSetup : MonoBehaviour
 {
-    void Start()
+    private McpServerHost _host;
+
+    async void Start()
     {
-        var server = gameObject.AddComponent<MCPForUnityServer>();
-        // 服务器会自动启动
+        var options = new McpServerHostOptions
+        {
+            Port = 3000,
+            ServerName = "UnityMCP",
+            EnableSceneTools = true,
+            EnableConsoleTools = true,
+            EnableTimeTools = true
+        };
+
+        _host = new McpServerHost(options);
+        await _host.StartAsync();
+    }
+
+    private async void OnDestroy()
+    {
+        if (_host != null)
+        {
+            await _host.DisposeAsync();
+        }
     }
 }
 ```
 
-### 2. 配置 Inspector
+### 2. 配置选项
 
-- **Port**: 服务器端口（默认 3000）
-- **Server Name**: 服务器名称
-- **Server Version**: 版本号
-- **Enable Scene Tools**: 启用场景操作工具
-- **Enable Console Tools**: 启用控制台工具
-- **Enable Time Tools**: 启用时间控制工具
+| 选项 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `Port` | int | 3000 | 服务器端口 |
+| `ServerName` | string | "UnityMCP" | 服务器名称 |
+| `ServerVersion` | string | "1.0.0" | 版本号 |
+| `Instructions` | string | - | 服务器说明 |
+| `LogLevel` | LogLevel | Information | 日志级别 |
+| `EnableSceneTools` | bool | true | 启用场景操作工具 |
+| `EnableConsoleTools` | bool | true | 启用控制台工具 |
+| `EnableTimeTools` | bool | true | 启用时间控制工具 |
 
 ### 3. 连接 MCP 客户端
 
@@ -77,7 +99,7 @@ MCP 客户端（如 Claude Desktop、VS Code MCP 插件）配置：
 ### 方式 1: 使用 AddCustomTool
 
 ```csharp
-server.AddCustomTool("create_sphere", "Create a sphere", async (args, ct) =>
+_host.AddCustomTool("create_sphere", "Create a sphere", async (args, ct) =>
 {
     float x = args?["x"]?.Value<float>() ?? 0f;
     float y = args?["y"]?.Value<float>() ?? 0f;
@@ -116,7 +138,7 @@ public static class MyTools
 }
 
 // 注册
-server.Server.RegisterToolsFromClass<MyTools>();
+_host.Server.RegisterToolsFromClass<MyTools>();
 ```
 
 ## 预置工具
@@ -144,6 +166,32 @@ server.Server.RegisterToolsFromClass<MyTools>();
 | `set_time_scale` | 设置时间缩放 |
 
 ## API 参考
+
+### IMcpServerHost 接口
+
+```csharp
+public interface IMcpServerHost : IAsyncDisposable
+{
+    McpServer Server { get; }
+    bool IsRunning { get; }
+    int Port { get; }
+    int ConnectedClients { get; }
+
+    event Action OnServerStarted;
+    event Action OnServerStopped;
+    event Action<string> OnServerError;
+
+    Task StartAsync();
+    Task StopAsync();
+
+    void AddCustomTool(string name, string description,
+        Func<JObject, CancellationToken, Task<CallToolResult>> handler,
+        JObject inputSchema = null);
+
+    void AddCustomTool<T>(string name, string description,
+        Func<T, CancellationToken, Task<CallToolResult>> handler);
+}
+```
 
 ### McpServer
 
@@ -178,6 +226,23 @@ var task = await server.TaskStore.RunAsTaskAsync(async ct =>
     await Task.Delay(5000, ct);
     return "Completed";
 }, "my_task_type");
+```
+
+## 生命周期管理
+
+`McpServerHost` 会自动监听 `Application.quitting` 事件，在应用退出时自动取消运行中的任务。
+
+你也可以手动管理：
+
+```csharp
+// 启动
+await _host.StartAsync();
+
+// 停止
+await _host.StopAsync();
+
+// 释放资源（推荐在 OnDestroy 中调用）
+await _host.DisposeAsync();
 ```
 
 ## 注意事项
