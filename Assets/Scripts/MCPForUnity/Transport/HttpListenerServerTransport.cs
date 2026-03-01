@@ -156,7 +156,8 @@ namespace ModelContextProtocol.Protocol
         private async Task HandleGetRequestAsync(HttpListenerContext context, CancellationToken cancellationToken)
         {
             var response = context.Response;
-            response.ContentType = "text/event-stream";
+            response.ContentType = "text/event-stream; charset=utf-8";
+            response.ContentEncoding = Encoding.UTF8;
             response.Headers.Add("Cache-Control", "no-cache");
             response.Headers.Add("Connection", "keep-alive");
 
@@ -191,12 +192,22 @@ namespace ModelContextProtocol.Protocol
             }
 
             string body;
-            using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
+            
+            try
             {
-                body = await reader.ReadToEndAsync();
+                using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
+                {
+                    body = await reader.ReadToEndAsync();
+                }
+                
+                _logger.Log(LogLevel.Debug, $"Received POST: {body}");
             }
-
-            _logger.Log(LogLevel.Debug, $"Received POST: {body}");
+            catch (Exception ex)
+            {
+                _logger.Log(LogLevel.Error, $"Failed to read request body: {ex.Message}", ex);
+                response.StatusCode = 400;
+                return;
+            }
 
             try
             {
@@ -221,7 +232,8 @@ namespace ModelContextProtocol.Protocol
 
                 if (hasResponse)
                 {
-                    response.ContentType = "application/json";
+                    response.ContentType = "application/json; charset=utf-8";
+                    response.ContentEncoding = Encoding.UTF8;
                     response.StatusCode = 202;
 
                     string responseBody;
@@ -235,6 +247,7 @@ namespace ModelContextProtocol.Protocol
                     }
 
                     var buffer = Encoding.UTF8.GetBytes(responseBody);
+                    response.ContentLength64 = buffer.Length;
                     await response.OutputStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
                 }
                 else
