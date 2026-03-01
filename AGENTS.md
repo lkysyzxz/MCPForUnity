@@ -525,10 +525,18 @@ _server.UnregisterInstanceTools("player_1");
 
 ### Description Enhancement
 
-Instance tool descriptions are automatically prefixed with `[Instance: {instanceId}]`:
+Instance tool descriptions are formatted as:
+`[Instance: {instanceId}] {classDescription} {methodDescription}`
 
-- Original: `"Get player health"`
-- Instance: `"[Instance: player_1] Get player health"`
+Where:
+- `{instanceId}`: The unique ID provided during registration
+- `{classDescription}`: Description from `[McpInstanceTool]` attribute
+- `{methodDescription}`: Description from `[McpServerTool]` attribute
+
+Example:
+- Class: `[McpInstanceTool(Description = "Player instance tools")]`
+- Method: `[McpServerTool(Description = "Get player health")]`
+- Result: `"[Instance: player_1] Player instance tools Get player health"`
 
 ### API Reference
 
