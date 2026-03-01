@@ -7,9 +7,5 @@ namespace ModelContextProtocol.Unity
         public string ServerVersion { get; set; } = "1.0.0";
         public string Instructions { get; set; } = "Unity MCP Server - Control Unity from AI assistants";
         public LogLevel LogLevel { get; set; } = LogLevel.Information;
-
-        public bool EnableSceneTools { get; set; } = true;
-        public bool EnableConsoleTools { get; set; } = true;
-        public bool EnableTimeTools { get; set; } = true;
     }
 }
