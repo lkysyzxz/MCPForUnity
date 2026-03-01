@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -399,7 +400,7 @@ namespace ModelContextProtocol.Server
                 }
             }
             
-            _logger?.Log(LogLevel.Information, $"Registered instance tools for '{instanceId}' ({methods.Count()} methods)");
+            _logger?.Log(LogLevel.Information, $"Registered instance tools for '{instanceId}' ({methods.Length} methods)");
         }
 
         public void UnregisterInstanceTools(string instanceId)
@@ -415,7 +416,11 @@ namespace ModelContextProtocol.Server
             
             foreach (var toolName in toolNames)
             {
-                _tools.Remove(t => t.Name == toolName);
+                var toolToRemove = _tools.FirstOrDefault(t => t.Name == toolName);
+                if (toolToRemove != null)
+                {
+                    _tools.Remove(toolToRemove);
+                }
                 _toolHandlers.Remove(toolName);
                 _allTools.RemoveAll(t => t.Name == toolName);
             }

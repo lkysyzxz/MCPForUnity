@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
