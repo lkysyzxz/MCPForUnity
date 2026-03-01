@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ModelContextProtocol.Protocol;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
 
 namespace ModelContextProtocol.Server
 {
@@ -369,9 +370,13 @@ namespace ModelContextProtocol.Server
             string name = !string.IsNullOrEmpty(attr.Name) ? attr.Name : method.Name;
             string description = attr.Description ?? "";
 
+            Tool tool;
+            bool isStatic = method.IsStatic;
+            object instance = null;
+
             try
             {
-                var tool = new Tool
+                tool = new Tool
                 {
                     Name = name,
                     Description = description,
@@ -380,14 +385,10 @@ namespace ModelContextProtocol.Server
                     IsValid = true
                 };
 
-                bool isStatic = method.IsStatic;
-                object instance = null;
-
                 if (!isStatic)
                 {
                     instance = Activator.CreateInstance(declaringType);
                 }
-
             }
             catch (McpException ex) when (ex.ErrorCode == McpErrorCode.InvalidParams)
             {
@@ -402,7 +403,7 @@ namespace ModelContextProtocol.Server
                 };
                 
                 _allTools.Add(invalidTool);
-                _logger?.Warning($"Tool '{name}' validation failed: {ex.Message}");
+                _logger?.Log(LogLevel.Warning, $"Tool '{name}' validation failed: {ex.Message}");
                 return;
             }
 
@@ -529,6 +530,7 @@ namespace ModelContextProtocol.Server
                 AddTool(tool, handler);
             }
         }
+
 
         private JObject GenerateInputSchema(MethodInfo method)
         {
@@ -867,7 +869,7 @@ namespace ModelContextProtocol.Server
             }
             catch (Exception ex)
             {
-                _logger?.Error($"Failed to parse custom type argument '{param.Name}': {ex.Message}");
+                _logger?.Log(LogLevel.Error, $"Failed to parse custom type argument '{param.Name}': {ex.Message}");
                 throw new McpException(McpErrorCode.InvalidParams, 
                     $"Invalid parameter '{param.Name}': {ex.Message}");
             }
@@ -888,7 +890,7 @@ namespace ModelContextProtocol.Server
             }
             catch (Exception ex)
             {
-                _logger?.Error($"Failed to parse custom type array argument '{param.Name}': {ex.Message}");
+                _logger?.Log(LogLevel.Error, $"Failed to parse custom type array argument '{param.Name}': {ex.Message}");
                 throw new McpException(McpErrorCode.InvalidParams, 
                     $"Invalid parameter '{param.Name}': {ex.Message}");
             }
