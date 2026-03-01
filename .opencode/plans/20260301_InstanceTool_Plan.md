@@ -16,7 +16,7 @@
 
 ### 任务1：新增 McpInstanceToolAttribute
 
-**文件:** `Assets/Scripts/MCPForUnity/Server/Tools/Attributes.cs`
+**文件:** `Assets/McpForUnity/Server/Tools/Attributes.cs`
 
 **修改内容:**
 ```csharp
@@ -32,7 +32,7 @@ public class McpInstanceToolAttribute : Attribute
 
 ### 任务2：在 McpServer 中添加实例管理字段
 
-**文件:** `Assets/Scripts/MCPForUnity/Server/McpServer.cs`
+**文件:** `Assets/McpForUnity/Server/McpServer.cs`
 
 **添加字段:**
 ```csharp
@@ -44,7 +44,7 @@ private readonly Dictionary<string, List<string>> _instanceToolNames = new Dicti
 
 ### 任务3：实现 RegisterToolsFromInstance 方法
 
-**文件:** `Assets/Scripts/MCPForUnity/Server/McpServer.cs`
+**文件:** `Assets/McpForUnity/Server/McpServer.cs`
 
 **方法签名:**
 ```csharp
@@ -63,7 +63,7 @@ public void RegisterToolsFromInstance(object instance, string instanceId)
 
 ### 任务4：实现 UnregisterInstanceTools 方法
 
-**文件:** `Assets/Scripts/MCPForUnity/Server/McpServer.cs`
+**文件:** `Assets/McpForUnity/Server/McpServer.cs`
 
 **方法签名:**
 ```csharp
@@ -79,7 +79,7 @@ public void UnregisterInstanceTools(string instanceId)
 
 ### 任务5：修改 RegisterToolFromMethod 支持实例工具
 
-**文件:** `Assets/Scripts/MCPForUnity/Server/McpServer.cs`
+**文件:** `Assets/McpForUnity/Server/McpServer.cs`
 
 **添加重载:**
 ```csharp
@@ -96,7 +96,7 @@ private void RegisterToolFromMethod(MethodInfo method, McpServerToolAttribute at
 
 ### 任务6：创建测试用例
 
-**文件:** `Assets/Scripts/MCPForUnity/Samples/InstanceTools/`
+**文件:** `Assets/McpForUnity/Samples/InstanceTools/`
 
 **示例类型:**
 ```csharp

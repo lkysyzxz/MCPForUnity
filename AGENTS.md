@@ -375,7 +375,7 @@ All JSON request/response encoding enforces UTF-8 per RFC 8259 specification.
 ## Project Structure
 
 ```
-Assets/Scripts/MCPForUnity/
+Assets/McpForUnity/
 ├── Core/
 │   ├── McpException.cs       # Custom exception types
 │   ├── McpErrorCode.cs       # Error codes enum

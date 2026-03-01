@@ -14,7 +14,7 @@ namespace ModelContextProtocol.Editor
 {
     public class EditorResourcesService
     {
-        private const string ConfigAssetPath = "Assets/Scripts/MCPForUnity/Editor/Configs/ResConfig.asset";
+        private const string ConfigAssetPath = "Assets/McpForUnity/Editor/Configs/ResConfig.asset";
         
         private MCPResConfig _config;
         private List<Resource> _resources = new List<Resource>();
