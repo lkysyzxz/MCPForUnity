@@ -8,6 +8,8 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEditorInternal;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -1694,20 +1696,20 @@ namespace ModelContextProtocol.Editor
 
         [McpServerTool("EditorRefreshAssets", Description = "Refresh asset database")]
         public static CallToolResult RefreshAssets(
-            [McpArgument(Description = "Import mode: ForceSync, ForceUncompressedImport, or Default", Required = false)] string importMode = "Default")
+            [McpArgument(Description = "Import options: ForceUpdate, ForceSync, ForceUncompressedImport, or Default", Required = false)] string importOptions = "Default")
         {
-            ImportMode mode = ImportMode.Default;
-            if (!string.IsNullOrEmpty(importMode))
+            ImportAssetOptions options = ImportAssetOptions.Default;
+            if (!string.IsNullOrEmpty(importOptions) && importOptions != "Default")
             {
-                Enum.TryParse(importMode, out mode);
+                Enum.TryParse(importOptions, out options);
             }
 
-            AssetDatabase.Refresh(mode);
+            AssetDatabase.Refresh(options);
 
             return SuccessResult(new JObject
             {
                 ["success"] = true,
-                ["importMode"] = mode.ToString()
+                ["importOptions"] = options.ToString()
             });
         }
 
