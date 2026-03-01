@@ -444,7 +444,7 @@ namespace ModelContextProtocol.Server
             
             string baseDescription = attr.Description ?? "";
             string classDescription = classAttr?.Description ?? "";
-            string description = $"[Instance: {instanceId}] {baseDescription}";
+            string description = $"[Instance: {instanceId}] {classDescription} {baseDescription}".Trim();
             
             Tool tool;
             
