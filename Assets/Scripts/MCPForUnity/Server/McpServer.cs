@@ -753,36 +753,61 @@ namespace ModelContextProtocol.Server
             
             var fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance);
             var validFields = new List<FieldInfo>();
+            var invalidFields = new List<string>();
             
             foreach (var field in fields)
             {
                 var jsonAttr = field.GetCustomAttribute<JsonPropertyAttribute>();
                 var mcpAttr = field.GetCustomAttribute<McpArgumentAttribute>();
                 
-                if (jsonAttr == null || mcpAttr == null)
-                    continue;
+                bool hasJsonAttr = jsonAttr != null;
+                bool hasMcpAttr = mcpAttr != null;
                 
-                validFields.Add(field);
-                
-                if (IsCustomType(field.FieldType) || IsCustomTypeArray(field.FieldType))
+                if (hasJsonAttr || hasMcpAttr)
                 {
-                    var fieldType = field.FieldType;
-                    if (fieldType.IsArray)
-                        fieldType = fieldType.GetElementType();
-                    else if (fieldType.IsGenericType)
-                        fieldType = fieldType.GetGenericArguments()[0];
-                    
-                    var (nestedValid, nestedError) = ValidateCustomType(fieldType, visited);
-                    if (!nestedValid)
-                        return (false, $"Field '{field.Name}': {nestedError}");
+                    if (hasJsonAttr && hasMcpAttr)
+                    {
+                        validFields.Add(field);
+                        
+                        if (IsCustomType(field.FieldType) || IsCustomTypeArray(field.FieldType))
+                        {
+                            var fieldType = field.FieldType;
+                            if (fieldType.IsArray)
+                                fieldType = fieldType.GetElementType();
+                            else if (fieldType.IsGenericType)
+                                fieldType = fieldType.GetGenericArguments()[0];
+                            
+                            var (nestedValid, nestedError) = ValidateCustomType(fieldType, visited);
+                            if (!nestedValid)
+                                return (false, $"Field '{field.Name}': {nestedError}");
+                        }
+                    }
+                    else
+                    {
+                        string missingAttr;
+                        if (hasJsonAttr && !hasMcpAttr)
+                            missingAttr = "[McpArgument]";
+                        else
+                            missingAttr = "[JsonProperty]";
+                        
+                        invalidFields.Add($"Field '{field.Name}' is missing {missingAttr} attribute");
+                    }
                 }
             }
             
+            if (invalidFields.Count > 0)
+            {
+                return (false, string.Join("; ", invalidFields));
+            }
+            
             if (validFields.Count == 0)
+            {
                 return (false, "No valid fields with [JsonProperty] and [McpArgument] attributes found");
+            }
             
             return (true, null);
         }
+
 
         private JObject GenerateCustomTypeSchema(Type type, string description, HashSet<Type> visited = null)
         {
