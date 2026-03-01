@@ -381,7 +381,7 @@ Assets/McpForUnity/
 │   ├── McpErrorCode.cs       # Error codes enum
 │   ├── Throw.cs              # Argument validation helpers
 │   ├── IMcpServerHost.cs     # Server host interface
-│   ├── McpServerHost.cs      # Pure C# server host implementation
+│   ├── McpServerHost.cs      # Pure C# server host (no built-in tools)
 │   ├── McpServerHostOptions.cs # Server host configuration
 │   └── Protocol/             # JSON-RPC and MCP protocol types
 ├── Server/
@@ -392,17 +392,39 @@ Assets/McpForUnity/
 │       └── Attributes.cs     # [McpServerTool], [McpArgument]
 ├── Transport/
 │   ├── ITransport.cs         # Transport interface
-│   └── HttpListenerServerTransport.cs
+│   ├── TransportBase.cs      # Base transport implementation
+│   ├── HttpListenerServerTransport.cs
+│   ├── SseParser.cs          # SSE parsing utilities
+│   └── SseEventWriter.cs     # SSE event writing
+├── Editor/                    # Editor-only MCP server
+│   ├── Tools/
+│   │   └── EditorToolsList.cs    # 80 built-in editor tools
+│   ├── Resources/
+│   │   └── EditorResourcesService.cs
+│   ├── Window/
+│   │   └── McpServerEditorWindow.cs
+│   ├── Menu/
+│   │   └── McpServerMenu.cs
+│   ├── Configs/
+│   │   ├── MCPResConfig.cs
+│   │   └── MCPResConfigEditor.cs
+│   └── GlobalEditorMcpServer.cs  # Editor server manager
 ├── Utilities/
 │   ├── UnityLogger.cs        # Logging abstraction
-│   └── MainThreadDispatcher.cs
+│   ├── MainThreadDispatcher.cs
+│   ├── UriTemplate.cs        # URI template matching
+│   └── Extensions/
+│       └── CommonExtensions.cs
 └── Samples/
     ├── MCPExampleUsage.cs    # Usage examples
-    └── CustomTypes/          # Custom type examples
-        ├── PersonInfo.cs     # Nested custom type example
-        ├── TeamInfo.cs       # Array custom type example
-        ├── AddressInfo.cs    # Basic custom type example
-        └── InvalidCustomType.cs  # Invalid type for testing
+    ├── CustomTypes/          # Custom type examples
+    │   ├── PersonInfo.cs
+    │   ├── TeamInfo.cs
+    │   ├── AddressInfo.cs
+    │   └── InvalidCustomType.cs
+    └── InstanceTools/        # Instance tool examples
+        ├── PlayerInstance.cs
+        └── EnemyInstance.cs
 ```
 
 ## Key Types
@@ -410,17 +432,81 @@ Assets/McpForUnity/
 | Type | Purpose |
 |------|---------|
 | `IMcpServerHost` | Interface for MCP server host, supports `IAsyncDisposable` |
-| `McpServerHost` | Pure C# implementation, auto-manages Unity lifecycle |
-| `McpServerHostOptions` | Configuration for server host (port, tools, etc.) |
+| `McpServerHost` | Pure C# implementation, auto-manages Unity lifecycle (no built-in tools) |
+| `McpServerHostOptions` | Configuration for server host (port, name, version, etc.) |
+| `McpServer` | Main server class, use `AddTool()`, `RegisterToolsFromClass<T>()` |
+| `GlobalEditorMcpServer` | Editor-only server manager with 80 built-in tools |
+| `EditorToolsList` | 80 editor tools: scene, GameObject, transform, component, build, asset, prefab |
 | `CallToolResult` | Tool execution result with `Content` list and `IsError` flag |
 | `ContentBlock` | Base for `TextContentBlock`, `ImageContentBlock` |
 | `Tool` | MCP tool definition with `Name`, `Description`, `InputSchema`, `IsValid`, `ValidationError` |
-| `McpServer` | Main server class, use `AddTool()`, `RegisterToolsFromClass<T>()` |
+
+## Editor vs Runtime
+
+| Feature | Editor Server | Runtime Server |
+|---------|--------------|----------------|
+| Managed by | `GlobalEditorMcpServer` | `McpServerHost` |
+| Default Port | 8090 | 3000 |
+| Built-in Tools | 80 (via `EditorToolsList`) | None |
+| Usage | Editor scripting | Game runtime |
+| Window | `McpServerEditorWindow` | Code only |
+| Resources | Supported | Not included |
+
+## Editor MCP Server
+
+### Overview
+`GlobalEditorMcpServer` provides a standalone MCP server for Unity Editor with 80 built-in tools for scene management, GameObject operations, asset management, and more.
+
+### Basic Usage
+```csharp
+using ModelContextProtocol.Editor;
+
+// Start server
+GlobalEditorMcpServer.Port = 8090;
+GlobalEditorMcpServer.StartServer();
+
+// Stop server
+GlobalEditorMcpServer.StopServer();
+
+// Access server instance
+var server = GlobalEditorMcpServer.Server;
+```
+
+### Editor Window
+- Menu: `Tools > MCP For Unity > Server Window`
+- Configure port and resources
+- View all registered tools with status indicators
+
+### Configuration Options
+| Option | Default | Description |
+|--------|---------|-------------|
+| `Port` | 8090 | Server port |
+| `ResourcesEnabled` | false | Enable resources service |
+| `FileWatchingEnabled` | false | Enable file watching |
+
+### Built-in Editor Tools (80 tools)
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Scene Management | 10 | `EditorGetActiveScene`, `EditorLoadScene`, `EditorSaveScene` |
+| GameObject Operations | 15 | `EditorCreateGameObject`, `EditorFindGameObject`, `EditorSetParent` |
+| Transform Operations | 10 | `EditorSetPosition`, `EditorSetRotation`, `EditorResetTransform` |
+| Component Operations | 10 | `EditorAddComponent`, `EditorSetComponentProperty` |
+| Compilation & Build | 10 | `EditorIsCompiling`, `EditorGetBuildTarget`, `EditorSetDefineSymbols` |
+| Asset Management | 15 | `EditorFindAssets`, `EditorCreateFolder`, `EditorMoveAsset` |
+| Prefab Operations | 10 | `EditorInstantiatePrefab`, `EditorCreatePrefab`, `EditorApplyPrefab` |
+
+### Tool Implementation Location
+```
+Assets/McpForUnity/Editor/Tools/EditorToolsList.cs
+```
 
 ## McpServerHost Usage
 
 ### Overview
 `McpServerHost` is a pure C# implementation that does not require `MonoBehaviour`. It automatically listens to `Application.quitting` for lifecycle management.
+
+> **Important**: Runtime `McpServerHost` does NOT include any built-in tools. All tools must be registered manually using `RegisterToolsFromClass()` or `AddCustomTool()`.
 
 ### Basic Usage
 ```csharp
@@ -436,13 +522,14 @@ public class Example : MonoBehaviour
         {
             Port = 3000,
             ServerName = "UnityMCP",
-            EnableSceneTools = true,
-            EnableConsoleTools = true,
-            EnableTimeTools = true
+            ServerVersion = "1.0.0"
         };
 
         _host = new McpServerHost(options);
         await _host.StartAsync();
+        
+        // Register custom tools (no built-in tools)
+        _host.Server.RegisterToolsFromClass(typeof(MyGameTools));
     }
 
     private async void OnDestroy()
@@ -461,11 +548,8 @@ public class Example : MonoBehaviour
 | `Port` | int | 3000 | Server port |
 | `ServerName` | string | "UnityMCP" | Server name |
 | `ServerVersion` | string | "1.0.0" | Server version |
-| `Instructions` | string | - | Server instructions |
+| `Instructions` | string | "Unity MCP Server..." | Server instructions |
 | `LogLevel` | LogLevel | Information | Log level |
-| `EnableSceneTools` | bool | true | Enable scene tools |
-| `EnableConsoleTools` | bool | true | Enable console tools |
-| `EnableTimeTools` | bool | true | Enable time tools |
 
 ### Events
 ```csharp
