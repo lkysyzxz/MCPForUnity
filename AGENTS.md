@@ -166,6 +166,38 @@ Support for custom types as tool parameters. Custom types are serialized as JSON
 - If a field uses only one attribute, the type is marked as **invalid**
 - At least one valid field is required per custom type
 
+### Required Field Determination
+
+Required 状态由以下特性决定（优先级从高到低）：
+
+| Priority | Attribute | Effect |
+|----------|-----------|--------|
+| 1 | `[JsonRequired]` | Required = true (highest priority) |
+| 2 | `[McpArgument(Required = true)]` | Required = true (fallback) |
+| 3 | None | Required = false |
+
+Example:
+```csharp
+public class ExampleType
+{
+    // Using JsonRequired
+    [JsonProperty("name")]
+    [JsonRequired]
+    [McpArgument(Description = "Name")]
+    public string Name;  // Required = true (JsonRequired)
+    
+    // Using McpArgument.Required
+    [JsonProperty("email")]
+    [McpArgument(Description = "Email", Required = true)]
+    public string Email;  // Required = true
+    
+    // Optional field
+    [JsonProperty("phone")]
+    [McpArgument(Description = "Phone")]
+    public string Phone;  // Required = false
+}
+```
+
 ### Supported Type Forms
 | Type | JSON Schema | Example |
 |------|-------------|---------|
@@ -179,12 +211,45 @@ Support for custom types as tool parameters. Custom types are serialized as JSON
 - Must be non-primitive, non-Unity, non-System types
 - Circular references handled gracefully
 
+### McpArgument.Name Limitation
+
+**For custom type fields**, `McpArgument.Name` is ignored. Field names are determined by `JsonProperty.PropertyName`.
+
+```csharp
+public class ExampleType
+{
+    // ✓ Correct: Only use JsonProperty for name
+    [JsonProperty("userName")]
+    [McpArgument(Description = "User name", Required = true)]
+    public string UserName;  // JSON field name: "userName"
+    
+    // ✗ Avoid: McpArgument.Name will be ignored
+    [JsonProperty("email")]
+    [McpArgument(Name = "userEmail", Description = "Email")]  // Name ignored
+    public string Email;  // JSON field name still: "email"
+}
+```
+
+**Note:** For Method parameters, `McpArgument.Name` is still effective.
+
+| Context | McpArgument.Name | JsonProperty.PropertyName |
+|---------|-----------------|--------------------------|
+| Method Parameter | ✓ Effective | N/A |
+| Custom Type Field | ✗ Ignored | ✓ Effective |
+
+A warning will be logged if `McpArgument.Name` conflicts with `JsonProperty.PropertyName`.
+
 ### Example: Define Custom Types
 
 ```csharp
 // Basic custom type
 public class AddressInfo
 {
+    [JsonProperty("street")]
+    [JsonRequired]  // Optional: mark as required
+    [McpArgument(Description = "街道名称")]
+    public string Street;
+
     [JsonProperty("city")]
     [McpArgument(Description = "城市名称", Required = true)]
     public string City;

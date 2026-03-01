@@ -769,6 +769,18 @@ namespace ModelContextProtocol.Server
                     {
                         validFields.Add(field);
                         
+                        // 警告：McpArgument.Name 对自定义类型字段无效
+                        if (mcpAttr != null && !string.IsNullOrEmpty(mcpAttr.Name))
+                        {
+                            string jsonName = jsonAttr.PropertyName ?? field.Name;
+                            if (mcpAttr.Name != jsonName)
+                            {
+                                _logger?.Log(LogLevel.Warning, 
+                                    $"Field '{field.Name}' in type '{type.Name}': McpArgument.Name '{mcpAttr.Name}' is ignored for custom type fields. " +
+                                    $"Using JsonProperty name '{jsonName}' instead.");
+                            }
+                        }
+                        
                         if (IsCustomType(field.FieldType) || IsCustomTypeArray(field.FieldType))
                         {
                             var fieldType = field.FieldType;
@@ -834,13 +846,14 @@ namespace ModelContextProtocol.Server
             {
                 var jsonAttr = field.GetCustomAttribute<JsonPropertyAttribute>();
                 var mcpAttr = field.GetCustomAttribute<McpArgumentAttribute>();
+                var jsonRequiredAttr = field.GetCustomAttribute<JsonRequiredAttribute>();
                 
                 if (jsonAttr == null || mcpAttr == null)
                     continue;
                 
                 string fieldName = jsonAttr.PropertyName ?? field.Name;
                 string fieldDesc = mcpAttr.Description ?? "";
-                bool isRequired = mcpAttr.Required;
+                bool isRequired = jsonRequiredAttr != null || mcpAttr.Required;
                 
                 JObject fieldSchema;
                 

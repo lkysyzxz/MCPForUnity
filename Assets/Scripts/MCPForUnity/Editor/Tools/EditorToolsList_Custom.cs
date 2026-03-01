@@ -123,6 +123,29 @@ namespace ModelContextProtocol.Editor
                 }
             };
         }
+
+        [McpServerTool("test_json_required", Description = "测试 JsonRequired 特性 - 验证必需字段判定")]
+        public static CallToolResult TestJsonRequired(
+            [McpArgument(Description = "示例数据（name 和 age 使用 JsonRequired，email 使用 McpArgument.Required）", Required = true)]
+            JsonRequiredExample data)
+        {
+            string result = $"姓名: {data.Name} (JsonRequired)\n";
+            result += $"年龄: {data.Age} (JsonRequired)\n";
+            result += $"邮箱: {data.Email} (McpArgument.Required)\n";
+            
+            if (!string.IsNullOrEmpty(data.Phone))
+                result += $"电话: {data.Phone} (可选)";
+            else
+                result += "电话: 未提供 (可选)";
+
+            return new CallToolResult
+            {
+                Content = new List<ContentBlock>
+                {
+                    new TextContentBlock { Text = result }
+                }
+            };
+        }
     }
 }
 #endif
