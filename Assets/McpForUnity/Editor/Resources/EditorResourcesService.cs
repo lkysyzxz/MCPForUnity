@@ -68,7 +68,7 @@ namespace ModelContextProtocol.Editor
 
         private void WriteResourceListLog()
         {
-            string logDirectory = "Assets/Logs";
+            string logDirectory = "Logs/ResourcesList";
             
             if (!Directory.Exists(logDirectory))
             {
