@@ -117,17 +117,25 @@ public string Description { get; set; }
 
 ## Vector Type Support
 
-### Supported Types
+### Supported Vector Types
 | Type | JSON Schema | Protocol Format |
 |------|-------------|-----------------|
 | `Vector2` | `paramName_x`, `paramName_y` (number) | Individual properties |
 | `Vector3` | `paramName_x`, `paramName_y`, `paramName_z` (number) | Individual properties |
 | `Vector4` | `paramName_x`, `paramName_y`, `paramName_z`, `paramName_w` (number) | Individual properties |
 | `Quaternion` | `paramName_x`, `paramName_y`, `paramName_z`, `paramName_w` (number) | Individual properties |
+| `Vector2Int` | `paramName_x`, `paramName_y` (integer) | Individual properties |
+| `Vector3Int` | `paramName_x`, `paramName_y`, `paramName_z` (integer) | Individual properties |
+
+### Vector Array Types
+| Type | JSON Schema | Protocol Format |
+|------|-------------|-----------------|
 | `Vector2[]` / `List<Vector2>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1, x2,y2, ...]` |
 | `Vector3[]` / `List<Vector3>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1,z1, x2,y2,z2, ...]` |
 | `Vector4[]` / `List<Vector4>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1,z1,w1, x2,y2,z2,w2, ...]` |
 | `Quaternion[]` / `List<Quaternion>` | `{ "type": "array", "items": { "type": "number" } }` | Flat float array `[x1,y1,z1,w1, x2,y2,z2,w2, ...]` |
+| `Vector2Int[]` / `List<Vector2Int>` | `{ "type": "array", "items": { "type": "integer" } }` | Flat integer array `[x1,y1, x2,y2, ...]` |
+| `Vector3Int[]` / `List<Vector3Int>` | `{ "type": "array", "items": { "type": "integer" } }` | Flat integer array `[x1,y1,z1, x2,y2,z2, ...]` |
 
 ### Example Tool with Vector Array
 ```csharp
@@ -155,6 +163,138 @@ public static CallToolResult SetPathPoints(
 }
 ```
 This represents 3 Vector3 points: (0,0,0), (1,2,3), (4,5,6)
+
+## Geometry Type Support
+
+### Overview
+Support for Unity geometry types (Bounds, Rect, Ray, etc.) with automatic parameter expansion.
+
+### Supported Geometry Types
+
+#### Shape Types
+| Type | Expanded Parameters | Array Format |
+|------|---------------------|--------------|
+| `Bounds` | `center_x`, `center_y`, `center_z`, `size_x`, `size_y`, `size_z` | `[cx,cy,cz,sx,sy,sz, ...]` |
+| `BoundsInt` | `position_x`, `position_y`, `position_z`, `size_x`, `size_y`, `size_z` (integer) | `[px,py,pz,sx,sy,sz, ...]` |
+| `Rect` | `x`, `y`, `width`, `height` | `[x,y,w,h, ...]` |
+| `RectInt` | `x`, `y`, `width`, `height` (integer) | `[x,y,w,h, ...]` |
+| `RectOffset` | `left`, `right`, `top`, `bottom` (integer) | `[l,r,t,b, ...]` |
+
+#### Raycast Types
+| Type | Expanded Parameters | Array Format |
+|------|---------------------|--------------|
+| `Ray` | `origin_x`, `origin_y`, `origin_z`, `direction_x`, `direction_y`, `direction_z` | `[ox,oy,oz,dx,dy,dz, ...]` |
+| `Ray2D` | `origin_x`, `origin_y`, `direction_x`, `direction_y` | `[ox,oy,dx,dy, ...]` |
+| `Plane` | `normal_x`, `normal_y`, `normal_z`, `distance` | `[nx,ny,nz,d, ...]` |
+
+#### Color Types
+| Type | Expanded Parameters | Array Format |
+|------|---------------------|--------------|
+| `Color` | `r`, `g`, `b`, `a` (0-1 range) | `[r,g,b,a, ...]` |
+| `Color32` | `r`, `g`, `b`, `a` (0-255 integer) | `[r,g,b,a, ...]` |
+
+#### Matrix Type
+| Type | Expanded Parameters | Array Format |
+|------|---------------------|--------------|
+| `Matrix4x4` | `m00`, `m01`, `m02`, `m03`, `m10`, ..., `m33` (16 values) | `[m00-m33, ...]` |
+
+### Example: Bounds Tool
+
+```csharp
+[McpServerTool("check_bounds", Description = "Check if point is inside bounds")]
+public static CallToolResult CheckBounds(
+    [McpArgument(Description = "Bounding box to check")] Bounds bounds,
+    [McpArgument(Description = "Point to test")] Vector3 point)
+{
+    bool contains = bounds.Contains(point);
+    return new CallToolResult
+    {
+        Content = new List<ContentBlock>
+        {
+            new TextContentBlock { Text = contains ? "Inside" : "Outside" }
+        }
+    };
+}
+```
+
+### Protocol Example: Bounds
+```json
+{
+  "name": "check_bounds",
+  "arguments": {
+    "bounds_center_x": 0,
+    "bounds_center_y": 0,
+    "bounds_center_z": 0,
+    "bounds_size_x": 10,
+    "bounds_size_y": 10,
+    "bounds_size_z": 10,
+    "point_x": 5,
+    "point_y": 5,
+    "point_z": 5
+  }
+}
+```
+
+### Example: Color Tool
+```csharp
+[McpServerTool("set_color", Description = "Set material color")]
+public static CallToolResult SetColor(
+    [McpArgument(Description = "RGBA color (0-1)")] Color color)
+{
+    return new CallToolResult
+    {
+        Content = new List<ContentBlock>
+        {
+            new TextContentBlock { Text = $"Color: RGBA({color.r}, {color.g}, {color.b}, {color.a})" }
+        }
+    };
+}
+```
+
+### Example: Ray Tool
+```csharp
+[McpServerTool("get_ray_point", Description = "Get point along ray")]
+public static CallToolResult GetRayPoint(
+    [McpArgument(Description = "Ray")] Ray ray,
+    [McpArgument(Description = "Distance")] float distance)
+{
+    Vector3 point = ray.GetPoint(distance);
+    return new CallToolResult
+    {
+        Content = new List<ContentBlock>
+        {
+            new TextContentBlock { Text = $"Point: {point}" }
+        }
+    };
+}
+```
+
+### Geometry Array Example
+```csharp
+[McpServerTool("process_rects", Description = "Process rectangle array")]
+public static CallToolResult ProcessRects(
+    [McpArgument(Description = "Rect array [x,y,w,h, ...]", Required = true)] Rect[] rects)
+{
+    return new CallToolResult
+    {
+        Content = new List<ContentBlock>
+        {
+            new TextContentBlock { Text = $"Processed {rects.Length} rectangles" }
+        }
+    };
+}
+```
+
+Protocol call with array:
+```json
+{
+  "name": "process_rects",
+  "arguments": {
+    "rects": [0, 0, 100, 50, 100, 100, 200, 100]
+  }
+}
+```
+This represents 2 Rects: (0,0,100,50) and (100,100,200,100)
 
 ## Custom Type Parameter Support
 
@@ -388,8 +528,11 @@ Assets/McpForUnity/
 │   ├── McpServer.cs          # Main server implementation
 │   ├── McpServerOptions.cs   # Configuration
 │   ├── McpSessionHandler.cs  # Session management
-│   └── Tools/
-│       └── Attributes.cs     # [McpServerTool], [McpArgument]
+│   ├── Tools/
+│   │   └── Attributes.cs     # [McpServerTool], [McpArgument]
+│   └── TypeHandlers/
+│       ├── GeometryTypeDefinitions.cs  # Geometry type metadata
+│       └── GeometryTypeHandler.cs      # Geometry type processing
 ├── Transport/
 │   ├── ITransport.cs         # Transport interface
 │   ├── TransportBase.cs      # Base transport implementation
@@ -417,6 +560,7 @@ Assets/McpForUnity/
 │       └── CommonExtensions.cs
 └── Samples/
     ├── MCPExampleUsage.cs    # Usage examples
+    ├── GeometryTypeExamples.cs # Geometry type examples (Bounds, Rect, Ray, etc.)
     ├── CustomTypes/          # Custom type examples
     │   ├── PersonInfo.cs
     │   ├── TeamInfo.cs
